@@ -18,7 +18,7 @@ class ConllDocument:
         self.coref_chain[chain_id]=[]
 
     def add_mention(self,mention):
-        chain_id = mention.get_chain_id()
+        chain_id = mention.chain_id
         self.coref_chain[chain_id].append(mention)
          
     def update_coref_chains(self,sent_index,token_index,token,chains):
@@ -34,21 +34,19 @@ class ConllDocument:
                 mention = Mention(chain_id,sent_index,token_index,token_index)
                 self.open_mentions.append(mention)
             elif chain.endswith(")"):
-                mention = [m for m in self.open_mentions if m.get_chain_id() == chain_id][0]
+                mention = [m for m in self.open_mentions if m.chain_id == chain_id][0]
                 mention.update(token_index,token)
                 self.add_mention(mention)
                 self.open_mentions.remove(mention)
         for mention in self.open_mentions:
             mention.update(token_index,token)
 
-    def get_sents(self):
-        return self.sents
+    def get_document_tokens(self):
+        """
+        returns document as list of tokens
+        """
+        return [token for sent in self.sents for token in sent]
 
-    def get_coref_chain(self):
-        return self.coref_chain
-
-    def get_content(self):
-        return self.content
 
 class Mention:
     def __init__(self,chain_id,sent_index,start_index,end_index):
@@ -58,14 +56,15 @@ class Mention:
         self.end_index = end_index
         self.tokens = []
 
-    def get_chain_id(self):
-        return self.chain_id
-
-    def get_tokens(self):
-        return self.tokens
-
-    def get_index(self):
+    def get_indices(self):
         return (self.sent_index,self.start_index,self.end_index)
+
+    def get_document_index(self,conll_doc):
+        """ 
+        returns index for mention within entire document
+        """
+        start_token_index = sum([len(conll_doc.sents[i]) for i in range(0,self.sent_index)])
+        return (start_token_index+self.start_index,start_token_index+self.end_index)
 
     def update(self,end_index,token):
         self.end_index = end_index
@@ -104,7 +103,7 @@ class ConllCorpusReader:
         coreference_chain = {}
         sent = []
         sent_index = 0
-        for line in conll_doc.get_content():
+        for line in conll_doc.content:
             if line=="\n":
                 conll_doc.add_sent(sent)
                 sent = []
