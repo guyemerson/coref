@@ -22,3 +22,5 @@ for conll_doc in train_conll_docs:
     for token in conll_doc.get_document_tokens():
         # when token is not in model, I create empty vector of length 300 (dim of Google's model)
         token_vectors.append(np.array([0]*300,dtype=np.float32) if token not in model else model[token])
+    # convert list of vectors to matrix
+    token_vector_matrix = np.matrix(token_vectors)
