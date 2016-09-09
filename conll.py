@@ -86,7 +86,7 @@ class ConllCorpusReader:
         return self.train_conll_docs if option == "train" else self.test_conll_docs
         
     def get_doc_list(self,option):
-        return [os.path.join(r,d) for r, s, ds in os.walk(self.root_dir+option) for d in ds if d.endswith("gold_conll")]
+        return [os.path.join(r,d) for r, _, ds in os.walk(self.root_dir+option) for d in ds if d.endswith("gold_conll")]
 
     def get_conll_doc_parts(self,doc):
         conll_doc_parts = []
@@ -100,7 +100,6 @@ class ConllCorpusReader:
         return conll_doc_parts
 
     def parse_conll_doc(self,conll_doc):
-        coreference_chain = {}
         sent = []
         sent_index = 0
         for line in conll_doc.content:
@@ -124,3 +123,4 @@ class ConllCorpusReader:
                 self.parse_conll_doc(conll_doc)
                 self.add_conll_doc(conll_doc,"test")
         logging.info("parsing complete")
+        return self

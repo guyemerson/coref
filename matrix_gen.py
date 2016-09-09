@@ -2,31 +2,38 @@
 """
 Created on Wed Aug  3 15:20:56 2016
 
-@author: Olesya Razuvayevskaya
+@author: Olesya Razuvayevskaya, Guy Emerson
 """
-#from __future__ import division
 
-from conll import *
-import string
+import numpy as np
 
-
-class matrix_generator:
-    def get_s_matrix(doc):
-    # generate the T matrix and initialize S_matrix
-    T_matrix=doc.get_document_tokens()
-    S_matrix=[]
-    # the coref chain consists of a list of coreferent mentions for each key chain id
-    coref_chain = doc.coref_chain
-    #generate the S_matrix
-    for chain_id in coref_chain:
-        mentions = coref_chain[chain_id]
-        for mention in mentions:
+def get_s_matrix(doc):
+    # Find number of tokens and initialize list of mention vectors
+    n_toks = len(doc.get_document_tokens())
+    S_list = []
+    # The coref chain consists of a list of coreferent mentions for each key chain id
+    # Sort the ids so that the order is stable
+    chains = sorted(doc.coref_chain.keys())
+    # Generate the S_matrix
+    for chain_id in chains:
+        for mention in doc.coref_chain[chain_id]:
             #initialize the matrix row
-            row=[0]*len(T_matrix)
-            chain_id = mention.chain_id
-            index = mention.get_document_index(doc)
+            row = np.zeros(n_toks)
+            start_index, end_index = mention.get_document_index(doc)
+            N = end_index+1 - start_index
             # assign values to the mention tokens in the tokens vector
-            for i in range(index[0],(index[1]+1)):
-                row[i]=1/(index[1]+1-index[0])
-            S_matrix.append(row)
-    return(S_matrix)
+            row[start_index:end_index+1] = 1/N
+            S_list.append(row)
+    return np.array(S_list)
+
+
+if __name__ == "__main__":
+    # Check it works
+    from conll import ConllCorpusReader
+    corpus_dir = "/anfs/bigdisc/kh562/Corpora/conll-2011/"
+    conll_reader = ConllCorpusReader(corpus_dir).parse_corpus()
+    train_conll_docs = conll_reader.get_conll_docs("train")
+    s_matrix = get_s_matrix(train_conll_docs[0])
+    nonzero, = s_matrix[0].nonzero()
+    print(nonzero)
+    print(train_conll_docs[0].get_document_tokens()[nonzero.min():nonzero.max()+1])

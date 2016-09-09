@@ -1,6 +1,6 @@
 # HOW TO USE CONLL PARSER
 
-from conll import *
+from conll import ConllCorpusReader
 
 corpus_dir = "/anfs/bigdisc/kh562/Corpora/conll-2011/"
 conll_reader = ConllCorpusReader(corpus_dir)
