@@ -29,6 +29,7 @@ def my_rnn(x, weights, biases):
     outputs, states = tf.nn.dynamic_rnn(cell, x, dtype=tf.float32) 
     # outputs is a tensor with shape [BATCH_SIZE, NUM_HIDDEN] (?)
     
+    # TODO: probably some of this reshaping is no longer necessary
     # Tensorflow doesn't currently support tensor contraction (I mean, seriously...)
     # So we have to convert to matrices and then convert back
     matrix_outputs = tf.reshape(outputs, [-1, NUM_HIDDEN])
@@ -82,6 +83,7 @@ with tf.Session() as sess:
     sess.run(init)
     print("Starting session")
     for step in range(EPOCHS):
+        # TODO: take out hard coding of 2 documents
         for i in range(2):
             current_x = my_x[i]
             current_y = my_y[i]
