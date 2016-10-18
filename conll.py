@@ -86,7 +86,7 @@ class ConllCorpusReader:
         return self.train_conll_docs if option == "train" else self.test_conll_docs
         
     def get_doc_list(self,option):
-        return [os.path.join(r,d) for r, _, ds in os.walk(self.root_dir+option) for d in ds if d.endswith("gold_conll")]
+        return sorted([os.path.join(r,d) for r, _, ds in os.walk(self.root_dir+option) for d in ds if d.endswith("gold_conll")])
 
     def get_conll_doc_parts(self,doc):
         conll_doc_parts = []
