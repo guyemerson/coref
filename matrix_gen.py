@@ -26,6 +26,27 @@ def get_s_matrix(doc):
             S_list.append(row)
     return np.array(S_list)
 
+def total_chain_len(doc,item):
+    length=0
+    for chain in item:
+        length=length+len(doc.coref_chain[chain])
+    return(length)
+ 
+    
+def coref_matrix(doc):
+    C_list=[]
+    chains = sorted(doc.coref_chain.keys())
+    n_mentions = total_chain_len(doc,chains)
+    start_index=0
+    for chain_id in chains:
+        end_index=start_index+len(doc.coref_chain[chain_id])
+        for mention in doc.coref_chain[chain_id]:  
+            row = np.zeros(n_mentions)
+            row[start_index:end_index]=1
+            C_list.append(row)
+        start_index=end_index
+    return(np.array(C_list))
+
 
 if __name__ == "__main__":
     # Check it works
