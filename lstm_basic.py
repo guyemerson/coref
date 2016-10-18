@@ -5,13 +5,19 @@
 import numpy as np
 import tensorflow as tf
 
+from conll import ConllCorpusReader
+from matrix_gen import get_s_matrix, coref_matrix
+corpus_dir = "/anfs/bigdisc/kh562/Corpora/conll-2011/"
+conll_reader = ConllCorpusReader(corpus_dir).parse_corpus()
+
+
 ### Hyperparameters
 
 LEARNING_RATE = 0.1
 EPOCHS = 20
 # TODO: input size to be set to 300 when using cached vectors (i.e. real data)
-INPUT_SIZE = 3
-NUM_HIDDEN = 6
+INPUT_SIZE = 300
+NUM_HIDDEN = 600
 
 # Currently hard-coding the batch size to be 1
 # This reduces the amount of reshaping that Tensorflow needs to do tensor contraction
@@ -43,6 +49,7 @@ nonneg_sim = tf.nn.relu(dot_product)
 
 # Square distance from correct coreference
 cost = tf.nn.l2_loss(nonneg_sim - y)
+error_rate = tf.truediv(cost, tf.to_float((tf.shape(y)[0] * (tf.shape(y)[0] - 1))))
 
 # TODO: currently the importance of a document grows quadratically with the number of referring expressions
 
@@ -57,24 +64,35 @@ init = tf.initialize_all_variables()  # Must be done AFTER introducing the optim
 
 with tf.Session() as sess:
     # code to load the cached document vectors
-    # train_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2011/training_docs.npz")["matrices"]
-    # test_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2011/test_docs.npz")["matrices"]
+    train_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2011/training_docs.npz", encoding='latin1')["matrices"]
+    test_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2011/test_docs.npz", encoding='latin1')["matrices"]
 
-    # Dummy data
-    my_x = [[[1.0, 2.3, 3.5], [1.0, 2.3, 3.5]], [[0.5, 0.42, 0.68], [0.5, 0.42, 0.68], [1.0, 2.3, 3.5], [1.0, -2.3, -3.5], [1.0, 2.3, 1.5]]]
-    my_y = [[[1, 0], [0, 1]], [[1, 1, 0], [1, 1, 0], [0, 0, 1]]]
-    my_s = [[[1, 0], [0, 1]], [[0.5, 0.5, 0, 0, 0], [0, 0, 1, 0, 0], [0, 0, 0, 0, 1]]]
+    train_conll_docs = conll_reader.get_conll_docs("train")
+    s_matrix = [get_s_matrix(x) for x in train_conll_docs]
+    train_coref_matrix = [coref_matrix(x) for x in train_conll_docs]
+#    nonzero, = s_matrix[0].nonzero()
+#    print(nonzero)
+#    print(train_conll_docs[0].get_document_tokens()[nonzero.min():nonzero.max()+1])
+
+    test_conll_docs = conll_reader.get_conll_docs("test")
+    test_s_matrix = [get_s_matrix(x) for x in test_conll_docs]
+    test_coref_matrix = [coref_matrix(x) for x in test_conll_docs]
 
     sess.run(init)
     print("Starting session")
     for step in range(EPOCHS):
-        # TODO: take out hard coding of 2 documents
-        for i in range(len(my_x)):
-            current_dict = {x: my_x[i], y: my_y[i], s: my_s[i]}
+        for i in range(len(train_conll_docs)):
+            current_dict = {x: train_docs[i], y: train_coref_matrix[i], s: s_matrix[i]}
             sess.run(optimizer, feed_dict=current_dict)
-            loss = sess.run(cost, feed_dict=current_dict)
-            coref_mat = sess.run(nonneg_sim, feed_dict=current_dict)
+            loss = sess.run(error_rate, feed_dict=current_dict)
+#            coref_mat = sess.run(nonneg_sim, feed_dict=current_dict)
             # TODO include coreference evaluation metric
             # print("Epoch {}\nMinibatch loss {:.6f}\nTraining acc {:.5f}".format(step+1, loss, acc))
-            print("Epoch {}\nMinibatch loss {:.6f}".format(step+1, loss))
-            print(coref_mat)
+            print("Epoch {}\nDocument {}\nMinibatch loss {:.6f}".format(step+1, i, loss))
+#            print(coref_mat)
+
+        for i in range(len(test_docs)):
+            current_dict = {x: test_docs[i], y: test_coref_matrix[i], s: test_s_matrix[i]}
+            loss = sess.run(error_rate, feed_dict=current_dict)
+            print("Document {}\nLoss {:.6f}".format(i, loss))
+            

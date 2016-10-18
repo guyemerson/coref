@@ -24,8 +24,9 @@ def get_s_matrix(doc):
             # assign values to the mention tokens in the tokens vector
             row[start_index:end_index+1] = 1/N
             S_list.append(row)
-    return np.array(S_list)
-
+    if S_list:
+        return np.array(S_list)
+    return np.zeros((0,n_toks))
     
 def coref_matrix(doc):
     C_list=[]
@@ -39,7 +40,9 @@ def coref_matrix(doc):
             row[start_index:end_index]=1
             C_list.append(row)
         start_index=end_index
-    return(np.array(C_list))
+    if C_list:
+        return(np.array(C_list))
+    return np.zeros((0,0))
 
 
 if __name__ == "__main__":
