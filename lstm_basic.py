@@ -9,6 +9,7 @@ import tensorflow as tf
 
 LEARNING_RATE = 0.1
 EPOCHS = 20
+# TODO: input size to be set to 300 when using cached vectors (i.e. real data)
 INPUT_SIZE = 3
 NUM_HIDDEN = 6
 
@@ -55,6 +56,10 @@ init = tf.initialize_all_variables()  # Must be done AFTER introducing the optim
 ### Run the model
 
 with tf.Session() as sess:
+    # code to load the cached document vectors
+    # train_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2011/training_docs.npz")["matrices"]
+    # test_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2011/test_docs.npz")["matrices"]
+
     # Dummy data
     my_x = [[[1.0, 2.3, 3.5], [1.0, 2.3, 3.5]], [[0.5, 0.42, 0.68], [0.5, 0.42, 0.68], [1.0, 2.3, 3.5], [1.0, -2.3, -3.5], [1.0, 2.3, 1.5]]]
     my_y = [[[1, 0], [0, 1]], [[1, 1, 0], [1, 1, 0], [0, 0, 1]]]
