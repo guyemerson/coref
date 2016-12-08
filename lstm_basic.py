@@ -18,6 +18,8 @@ EPOCHS = 20
 # TODO: input size to be set to 300 when using cached vectors (i.e. real data)
 INPUT_SIZE = 300
 NUM_HIDDEN = 600
+# threshold for cosine similarity on coref matrix (C) 
+THRESHOLD=0.79
 
 # Currently hard-coding the batch size to be 1
 # This reduces the amount of reshaping that Tensorflow needs to do tensor contraction
@@ -87,6 +89,10 @@ with tf.Session() as sess:
             loss = sess.run(error_rate, feed_dict=current_dict)
 #            coref_mat = sess.run(nonneg_sim, feed_dict=current_dict)
             # TODO include coreference evaluation metric
+            try:
+                scores = get_evaluation(train_conll_docs[i],coref_mat,THRESHOLD)
+                print(scores["formatted"])
+            except: pass
             # print("Epoch {}\nMinibatch loss {:.6f}\nTraining acc {:.5f}".format(step+1, loss, acc))
             print("Epoch {}\nDocument {}\nMinibatch loss {:.6f}".format(step+1, i, loss))
 #            print(coref_mat)
