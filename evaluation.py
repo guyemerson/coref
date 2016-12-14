@@ -1,14 +1,33 @@
-# from conll import ConllCorpusReader
-# from matrix_gen import coref_matrix
-
 import numpy as np
 import os, subprocess
-from sklearn.cluster import DBSCAN
 
-# corpus_dir = "/anfs/bigdisc/kh562/Corpora/conll-2011/"
-# conll_reader = ConllCorpusReader(corpus_dir).parse_corpus()
-# test_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2011/test_docs.npz", encoding='latin1')["matrices"]
-# test_conll_docs = conll_reader.get_conll_docs("test")
+def get_evaluation(gold_doc,coref_mat,threshold):
+    chain_ids = sorted(gold_doc.coref_chain.keys())
+    gold_mentions = [m for chain_id in chain_ids for m in gold_doc.coref_chain[chain_id]]
+    # binarise matrix according to threshold
+    binarised = np.array(np.where(coref_mat > threshold,1,0))
+    # make sure mentions are self-referential
+    np.fill_diagonal(binarised,1)
+    # check if any similarity greater than threshold
+    if np.array_equal(binarised,np.identity(binarised.shape[1])):
+        return null_scores()
+    # remove singleton mentions
+    predictions = np.vstack({tuple(row) for row in binarised if np.sum(row)>1})
+    # join overlapping predicted coref chains
+    for col in range(0,predictions.shape[1]):
+        overlaps = None if len(np.where(predictions.T[col]==1)[0])==1 else list(np.where(predictions.T[col]==1)[0])
+        if overlaps:
+            predictions = np.vstack((predictions,np.logical_or.reduce([predictions[i] for i in overlaps])))
+            predictions = np.delete(predictions,overlaps,axis=0)
+    predicted_coref_chain = {}
+    for chain_id,chain in enumerate(predictions):
+        mentions = [gold_mentions[i] for i,v in enumerate(chain) if v == 1]
+        predicted_coref_chain[str(chain_id)]=mentions
+    gold = populate_doc(gold_doc,gold_doc.coref_chain)    
+    test = populate_doc(gold_doc,predicted_coref_chain)
+    write_doc("gold",gold)
+    write_doc("test",test)
+    return get_scores("gold","test")
 
 def populate_doc(doc,coref_chain):
     doc_array = []
@@ -38,24 +57,19 @@ def write_doc(name,doc):
         output.write("\n")
     output.write("#end document")
 
-def get_evaluation(gold_doc,coref_mat,threshold):
-    chain_ids = sorted(gold_doc.coref_chain.keys())
-    gold_mentions = [m for chain_id in chain_ids for m in gold_doc.coref_chain[chain_id]]
-    # binarise matrix according to threshold
-    binarised = np.array(np.where(coref_mat > threshold,coref_mat,0))
-    # make sure mentions are self-referential
-    np.fill_diagonal(coref_mat,1)
-    # remove singleton mentions
-    predictions = np.vstack({tuple(row) for row in binarised if np.sum(row)>1})
-    predicted_coref_chain = {}
-    for chain_id,chain in enumerate(predictions):
-        mentions = [gold_mentions[i] for i,v in enumerate(chain) if v == 1]
-        predicted_coref_chain[str(chain_id)]=mentions
-    gold = populate_doc(gold_doc,gold_doc.coref_chain)    
-    test = populate_doc(gold_doc,predicted_coref_chain)
-    write_doc("gold",gold)
-    write_doc("test",test)
-    return get_scores("gold","test")
+def null_scores():
+    metrics = ['muc','bcub','ceafm','ceafe','blanc']
+    scores = {}
+    for metric in metrics:
+        scores[metric]=0.00
+    scores["formatted"] = "\tR\tP\tF1\n"
+    for metric in metrics:
+        scores["formatted"] += metric + "\t" + \
+            "\t".join(["0.00"]*3) + "\n"
+    scores["formatted"] += "\n"
+    scores["avg"] = 0.00
+    scores["formatted"] += "conll\t\t\t" + "0.00" + "\n"
+    return scores
 
 def get_scores(gold,test):
     scorer_output = subprocess.check_output(["perl","/anfs/bigdisc/kh562/coref-scorer/scorer.pl",
@@ -79,8 +93,3 @@ def get_scores(gold,test):
                scores["ceafe"][2])/3
     scores["formatted"] += "conll\t\t\t" + format(scores["avg"], '.2f') + "\n"
     return scores
-
-# # provide original test doc and coreference matrix of predictions
-# scores = get_evaluation(test_conll_docs[1],coref_matrix(test_conll_docs[1]),0.79)
-
-# print(scores["formatted"])
