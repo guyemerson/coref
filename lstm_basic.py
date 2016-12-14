@@ -7,6 +7,8 @@ import tensorflow as tf
 
 from conll import ConllCorpusReader
 from matrix_gen import get_s_matrix, coref_matrix
+from evaluation import get_evaluation
+
 corpus_dir = "/anfs/bigdisc/kh562/Corpora/conll-2011/"
 conll_reader = ConllCorpusReader(corpus_dir).parse_corpus()
 
@@ -87,7 +89,7 @@ with tf.Session() as sess:
             current_dict = {x: train_docs[i], y: train_coref_matrix[i], s: s_matrix[i]}
             sess.run(optimizer, feed_dict=current_dict)
             loss = sess.run(error_rate, feed_dict=current_dict)
-#            coref_mat = sess.run(nonneg_sim, feed_dict=current_dict)
+            coref_mat = sess.run(nonneg_sim, feed_dict=current_dict)
             # TODO include coreference evaluation metric
             try:
                 scores = get_evaluation(train_conll_docs[i],coref_mat,THRESHOLD)
