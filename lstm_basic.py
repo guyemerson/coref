@@ -90,6 +90,7 @@ with tf.Session() as sess:
             sess.run(optimizer, feed_dict=current_dict)
             loss = sess.run(error_rate, feed_dict=current_dict)
             coref_mat = sess.run(nonneg_sim, feed_dict=current_dict)
+            # get evaluation of current predicted coref matrix
             print(get_evaluation(train_conll_docs[i],coref_mat,THRESHOLD)["formatted"])
             # print("Epoch {}\nMinibatch loss {:.6f}\nTraining acc {:.5f}".format(step+1, loss, acc))
             print("Epoch {}\nDocument {}\nMinibatch loss {:.6f}".format(step+1, i, loss))
