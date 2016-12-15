@@ -72,7 +72,7 @@ with tf.Session() as sess:
     test_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2011/test_docs.npz", encoding='latin1')["matrices"]
 
     train_conll_docs = conll_reader.get_conll_docs("train")
-    s_matrix = [get_s_matrix(x) for x in train_conll_docs]
+    train_s_matrix = [get_s_matrix(x) for x in train_conll_docs]
     train_coref_matrix = [coref_matrix(x) for x in train_conll_docs]
 #    nonzero, = s_matrix[0].nonzero()
 #    print(nonzero)
@@ -86,18 +86,13 @@ with tf.Session() as sess:
     print("Starting session")
     for step in range(EPOCHS):
         for i in range(len(train_conll_docs)):
-            current_dict = {x: train_docs[i], y: train_coref_matrix[i], s: s_matrix[i]}
+            current_dict = {x: train_docs[i], y: train_coref_matrix[i], s: train_s_matrix[i]}
             sess.run(optimizer, feed_dict=current_dict)
             loss = sess.run(error_rate, feed_dict=current_dict)
             coref_mat = sess.run(nonneg_sim, feed_dict=current_dict)
-            # TODO include coreference evaluation metric
-            try:
-                scores = get_evaluation(train_conll_docs[i],coref_mat,THRESHOLD)
-                print(scores["formatted"])
-            except: pass
+            print(get_evaluation(train_conll_docs[i],coref_mat,THRESHOLD)["formatted"])
             # print("Epoch {}\nMinibatch loss {:.6f}\nTraining acc {:.5f}".format(step+1, loss, acc))
             print("Epoch {}\nDocument {}\nMinibatch loss {:.6f}".format(step+1, i, loss))
-#            print(coref_mat)
 
         for i in range(len(test_docs)):
             current_dict = {x: test_docs[i], y: test_coref_matrix[i], s: test_s_matrix[i]}
