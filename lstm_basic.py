@@ -7,6 +7,8 @@ import tensorflow as tf
 
 from conll import ConllCorpusReader
 from matrix_gen import get_s_matrix, coref_matrix
+from evaluation import get_evaluation
+
 corpus_dir = "/anfs/bigdisc/kh562/Corpora/conll-2011/"
 conll_reader = ConllCorpusReader(corpus_dir).parse_corpus()
 
@@ -19,6 +21,8 @@ EPOCHS = 20
 # TODO: input size to be set to 300 when using cached vectors (i.e. real data)
 INPUT_SIZE = 300
 NUM_HIDDEN = 600
+# threshold for cosine similarity on coref matrix (C) 
+THRESHOLD=0.79
 
 # Currently hard-coding the batch size to be 1
 # This reduces the amount of reshaping that Tensorflow needs to do tensor contraction
@@ -69,7 +73,7 @@ with tf.Session() as sess:
     test_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2011/test_docs.npz", encoding='latin1')["matrices"]
 
     train_conll_docs = conll_reader.get_conll_docs("train")
-    s_matrix = [get_s_matrix(x) for x in train_conll_docs]
+    train_s_matrix = [get_s_matrix(x) for x in train_conll_docs]
     train_coref_matrix = [coref_matrix(x) for x in train_conll_docs]
 #    nonzero, = s_matrix[0].nonzero()
 #    print(nonzero)
@@ -83,14 +87,14 @@ with tf.Session() as sess:
     print("Starting session")
     for step in range(EPOCHS):
         for i in range(len(train_conll_docs)):
-            current_dict = {x: train_docs[i], y: train_coref_matrix[i], s: s_matrix[i]}
+            current_dict = {x: train_docs[i], y: train_coref_matrix[i], s: train_s_matrix[i]}
             sess.run(optimizer, feed_dict=current_dict)
             loss = sess.run(error_rate, feed_dict=current_dict)
-#            coref_mat = sess.run(nonneg_sim, feed_dict=current_dict)
-            # TODO include coreference evaluation metric
+            coref_mat = sess.run(nonneg_sim, feed_dict=current_dict)
+            # get evaluation of current predicted coref matrix
+            print(get_evaluation(train_conll_docs[i],coref_mat,THRESHOLD)["formatted"])
             # print("Epoch {}\nMinibatch loss {:.6f}\nTraining acc {:.5f}".format(step+1, loss, acc))
             print("Epoch {}\nDocument {}\nMinibatch loss {:.6f}".format(step+1, i, loss))
-#            print(coref_mat)
 
         for i in range(len(test_docs)):
             current_dict = {x: test_docs[i], y: test_coref_matrix[i], s: test_s_matrix[i]}
