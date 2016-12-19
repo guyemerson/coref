@@ -12,6 +12,7 @@ conll_reader = ConllCorpusReader(corpus_dir).parse_corpus()
 
 tf.set_random_seed(1234)
 
+
 ### Hyperparameters
 
 LEARNING_RATE = 0.1
@@ -57,7 +58,8 @@ error_rate = tf.truediv(cost, tf.to_float((tf.shape(y)[0] * (tf.shape(y)[0] - 1)
 # TODO: coreference evaluation metrics, after thresholding or clustering
 
 # Train the model
-optimizer = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE).minimize(cost)
+adam = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE)
+optimizer = adam.minimize(cost)
 
 init = tf.initialize_all_variables()  # Must be done AFTER introducing the optimizer (see http://stackoverflow.com/questions/33788989/tensorflow-using-adam-optimizer)
 
@@ -79,6 +81,16 @@ with tf.Session() as sess:
     test_s_matrix = [get_s_matrix(x) for x in test_conll_docs]
     test_coref_matrix = [coref_matrix(x) for x in test_conll_docs]
 
+    varnames = [v.name for v in tf.trainable_variables()]
+    print(varnames)
+
+#   RNN/BasicLSTMCell/Linear/Matrix:0, RNN/BasicLSTMCell/Linear/Bias:0
+
+    maxweight = [tf.reduce_max(x) for x in tf.trainable_variables()]
+    meanweight = [tf.reduce_mean(x) for x in tf.trainable_variables()]
+    gradients = [tf.reduce_max(x) for x, _ in adam.compute_gradients(cost)]
+    meangradients = [tf.reduce_mean(x) for x, _ in adam.compute_gradients(cost)]
+
     sess.run(init)
     print("Starting session")
     for step in range(EPOCHS):
@@ -91,6 +103,14 @@ with tf.Session() as sess:
             # print("Epoch {}\nMinibatch loss {:.6f}\nTraining acc {:.5f}".format(step+1, loss, acc))
             print("Epoch {}\nDocument {}\nMinibatch loss {:.6f}".format(step+1, i, loss))
 #            print(coref_mat)
+            current_mean_weight = sess.run(meanweight)
+            print("Mean weight", current_mean_weight)
+            current_max_weight = sess.run(maxweight)
+            print("Max weight", current_max_weight)
+            current_mean_gradient = sess.run(meangradients, feed_dict=current_dict)
+            print("Mean gradient", current_mean_gradient)
+            current_max_gradient = sess.run(gradients, feed_dict=current_dict)
+            print("Max gradient", current_max_gradient)
 
         for i in range(len(test_docs)):
             current_dict = {x: test_docs[i], y: test_coref_matrix[i], s: test_s_matrix[i]}
