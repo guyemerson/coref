@@ -30,18 +30,18 @@ THRESHOLD=0.79
 ### Inputs and outputs
 
 # Embedding matrix
-x = tf.placeholder(tf.float32, [None, INPUT_SIZE])  # num tokens this doc, input vec size
+x = tf.placeholder(tf.float64, [None, INPUT_SIZE])  # num tokens this doc, input vec size
 # Coreference matrix
-y = tf.placeholder(tf.float32, [None, None])        # num mentions this doc, num mentions this doc
+y = tf.placeholder(tf.float64, [None, None])        # num mentions this doc, num mentions this doc
 # Referring expression matrix
-s = tf.placeholder(tf.float32, [None, None])        # num mentions this doc, num tokens this doc
+s = tf.placeholder(tf.float64, [None, None])        # num mentions this doc, num tokens this doc
 
 ### Define the model
 
 # RNN
-cell = tf.nn.rnn_cell.BasicLSTMCell(NUM_HIDDEN, state_is_tuple=True)
+cell = tf.contrib.rnn.core_rnn_cell.BasicLSTMCell(NUM_HIDDEN, state_is_tuple=True)
 broadcast_x = tf.expand_dims(x, 0)  # Set batch size to 1
-broadcast_outputs, states = tf.nn.dynamic_rnn(cell, broadcast_x, dtype=tf.float32)
+broadcast_outputs, states = tf.nn.dynamic_rnn(cell, broadcast_x, dtype=tf.float64)
 outputs = tf.squeeze(broadcast_outputs)  # Remove the batch size index (of size 1)
 
 # Entity representations
@@ -53,8 +53,17 @@ dot_product = tf.matmul(normed_entities, tf.transpose(normed_entities))  # num m
 nonneg_sim = tf.nn.relu(dot_product)
 
 # Square distance from correct coreference
-cost = tf.nn.l2_loss(nonneg_sim - y) + 0.1*sum([tf.reduce_sum(x**2) for x in tf.trainable_variables()])
-error_rate = tf.truediv(cost, tf.to_float((tf.shape(y)[0] * (tf.shape(y)[0] - 1))))
+# cost = tf.nn.l2_loss(nonneg_sim - y)
+
+
+# OLD COST
+# cost = tf.nn.l2_loss(nonneg_sim - y)
+cost =  - (1/tf.shape(y)[0]**2) * tf.reduce_sum(y*tf.log(nonneg_sim+(1e-10)) + (1-y)*tf.log(1+(1e-10)-nonneg_sim))
+reg = 0.1*sum([tf.reduce_sum(x**2) for x in tf.trainable_variables()])
+cost = cost + reg
+
+
+error_rate = tf.truediv(cost, tf.cast((tf.shape(y)[0] * (tf.shape(y)[0] - 1)), tf.float64))
 
 # TODO: currently the importance of a document grows quadratically with the number of referring expressions
 
@@ -89,11 +98,12 @@ with tf.Session() as sess:
         for i in range(len(train_conll_docs)):
             current_dict = {x: train_docs[i], y: train_coref_matrix[i], s: train_s_matrix[i]}
             sess.run(optimizer, feed_dict=current_dict)
+
             loss = sess.run(error_rate, feed_dict=current_dict)
             coref_mat = sess.run(nonneg_sim, feed_dict=current_dict)
             # get evaluation of current predicted coref matrix
             print(get_evaluation(train_conll_docs[i],coref_mat,THRESHOLD)["formatted"])
-            # print("Epoch {}\nMinibatch loss {:.6f}\nTraining acc {:.5f}".format(step+1, loss, acc))
+#            print("Epoch {}\nMinibatch loss {:.6f}\nTraining acc {:.5f}".format(step+1, loss, acc))
             print("Epoch {}\nDocument {}\nMinibatch loss {:.6f}".format(step+1, i, loss))
 
         for i in range(len(test_docs)):
