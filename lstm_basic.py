@@ -52,13 +52,11 @@ normed_entities = tf.nn.l2_normalize(entities, 1)
 dot_product = tf.matmul(normed_entities, tf.transpose(normed_entities))  # num mentions, num mentions
 nonneg_sim = tf.nn.relu(dot_product)
 
-# Square distance from correct coreference
+# OLD COST (square distance)
 # cost = tf.nn.l2_loss(nonneg_sim - y)
 
-
-# OLD COST
-# cost = tf.nn.l2_loss(nonneg_sim - y)
-cost =  - (1/tf.shape(y)[0]**2) * tf.reduce_sum(y*tf.log(nonneg_sim+(1e-10)) + (1-y)*tf.log(1+(1e-10)-nonneg_sim))
+# NEW COST (cross entropy)
+cost =  - (1/tf.size(y)) * tf.reduce_sum(y*tf.log(nonneg_sim+(1e-10)) + (1-y)*tf.log(1+(1e-10)-nonneg_sim))
 reg = 0.1*sum([tf.reduce_sum(x**2) for x in tf.trainable_variables()])
 cost = cost + reg
 
