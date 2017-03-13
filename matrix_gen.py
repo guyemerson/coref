@@ -8,6 +8,13 @@ Created on Wed Aug  3 15:20:56 2016
 import numpy as np
 
 def get_s_matrix(doc):
+    """
+    Return a matrix of shape [num_mentions, num_tokens],
+    with a nonzero value whenever the token is part of the mention.
+    Each row sums to 1. 
+    :param doc: ConllDocument
+    :return: numpy array
+    """
     # Find number of tokens and initialize list of mention vectors
     n_toks = len(doc.get_document_tokens())
     S_list = []
@@ -17,7 +24,7 @@ def get_s_matrix(doc):
     # Generate the S_matrix
     for chain_id in chains:
         for mention in doc.coref_chain[chain_id]:
-            #initialize the matrix row
+            # Initialize the matrix row
             row = np.zeros(n_toks)
             start_index, end_index = mention.get_document_index(doc)
             N = end_index+1 - start_index
@@ -27,8 +34,40 @@ def get_s_matrix(doc):
     if S_list:
         return np.array(S_list)
     return np.zeros((0,n_toks))
+
+def get_mention_matrix(doc):
+    """
+    Return a matrix of shape [num_mentions, num_tokens],
+    with a value of 1 at the final token of each mention. 
+    :param doc: ConllDocument
+    :return: numpy array
+    """
+    # Find number of tokens and initialize list of mention vectors
+    n_toks = len(doc.get_document_tokens())
+    S_list = []
+    # The coref chain consists of a list of coreferent mentions for each key chain id
+    # Sort the ids so that the order is stable
+    chains = sorted(doc.coref_chain.keys())
+    # Generate the S_matrix
+    for chain_id in chains:
+        for mention in doc.coref_chain[chain_id]:
+            # Initialize the matrix row as 0s
+            row = np.zeros(n_toks, dtype='bool')
+            # Set 1 at the final token
+            _, end_index = mention.get_document_index(doc)
+            row[end_index] = 1
+            S_list.append(row)
+    if S_list:
+        return np.array(S_list)
+    return np.zeros((0,n_toks))
     
 def coref_matrix(doc):
+    """
+    Return a matrix of shape [num_mentions, num_mentions],
+    with a value of 1 whenever two mentions are coreferent. 
+    :param doc: ConllDocument
+    :return: numpy array
+    """
     C_list=[]
     chains = sorted(doc.coref_chain.keys())
     n_mentions = sum([len(doc.coref_chain[chain]) for chain in chains])
