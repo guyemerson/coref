@@ -87,6 +87,7 @@ class SalienceMemoryRNNCell(tf.contrib.rnn.RNNCell):
         # Cast index from float to int
         index = tf.cast(index_float, tf.int32)
         # Query over memories
+        # (what activation function?)
         query = tf.nn.relu(tf.matmul(hidden, self.hidden_to_memory))
         # Cosine similarity between query and memories
         normed_query = tf.nn.l2_normalize(query, dim=1)
@@ -95,6 +96,7 @@ class SalienceMemoryRNNCell(tf.contrib.rnn.RNNCell):
         similarity = tf.matmul(normed_query,  # [1, memory_size]
                                tf.squeeze(normed_memory),  # [1, max_mentions, memory_size]
                                transpose_b=True)
+        weighted_sim = similarity * salience
         # Take attention over these similarities,
         # with a default score for the new entity
         # and no attention for later entities
@@ -102,7 +104,7 @@ class SalienceMemoryRNNCell(tf.contrib.rnn.RNNCell):
         # (whether to use an existing entity, and if so, which  )
         infs = tf.ones((1,self.max_mentions), dtype=tf.float64) * -np.inf
         mask = tf.sequence_mask([index[0]+1], self.max_mentions)
-        scores = tf.where(mask, similarity, infs) + tf.one_hot(index, self.max_mentions, self.new_entity_score, dtype=tf.float64)
+        scores = tf.where(mask, weighted_sim, infs) + tf.one_hot(index, self.max_mentions, self.new_entity_score, dtype=tf.float64)
         attention = tf.nn.softmax(scores * self.attention_beta)  # [1, max_mentions]
         # Add the query vector to the memory
         memory_update = tf.expand_dims(tf.transpose(attention) * query, 0)  # Use broadcasting to do outer product
@@ -113,7 +115,8 @@ class SalienceMemoryRNNCell(tf.contrib.rnn.RNNCell):
                                 + tf.matmul(hidden, self.hidden_to_hidden_from_memory))
         # Decay the salience and increase the salience of the activated memory slot(s)
         # (There could be better ways of updating the salience)
-        new_salience = tf.minimum(salience * self.salience_decay + attention, 1)
+        #new_salience = tf.minimum(salience * self.salience_decay + attention, 1)
+        new_salience = tf.maximum(salience * self.salience_decay, attention)
         # Increment the index and cast back to a float
         new_index = index+1
         new_index_float = tf.cast(new_index, tf.float64)
@@ -130,7 +133,7 @@ if __name__ == '__main__':
     INPUT_SIZE = 7
     HIDDEN_SIZE = 5
     MEMORY_SIZE = 4
-    MAX_MENTIONS = 3
+    MAX_MENTIONS = 5
     
     # Input data
     
