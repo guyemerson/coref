@@ -2,83 +2,91 @@ import numpy as np
 import tensorflow as tf
 
 
-class SalienceMemoryRNNCell(tf.contrib.rnn.RNNCell):
+class SalienceMemoryMixin(tf.contrib.rnn.RNNCell):
     """
-    A vanilla RNN cell with a salience memory extension
+    A salience memory extension to be added to any standard RNN cell.
+    
+    Intended use:
+    >>> class CellWithMemory(SalienceMemoryMixin, Cell):
+    >>>     pass
     """
     
-    def __init__(self, input_size, hidden_size, memory_size, max_mentions):
+    def __init__(self, memory_size, max_mentions, *args, **kwargs):
         """
         Set sizes of tensors and initialise weights
-        :param input_size: number of dimensions in the input embeddings
-        :param hidden_size: number of dimensions in the hidden state
         :param memory_size: number of dimensions in each memory vector
         :param max_mentions: maximum number of mentions in an input sequence
+        Remaining arguments and keyword arguments are passed to super
         """
+        # Initialise the standard RNN
+        super().__init__(*args, **kwargs)
         # Sizes of objects
-        self.input_size = input_size
-        self.hidden_size = hidden_size 
         self.memory_size = memory_size
         self.max_mentions = max_mentions
+        self.inner_output_size = super().output_size
+        # We also need RNN updates when queries are returned
+        # To do this, we need a new set of weights
+        # The Method Resolution Order should be:
+        # [Child, SalienceMemoryMixin, Parent, RNNCell, object]
+        ParentClass = type(self).__mro__[2]
+        with tf.variable_scope('secondary_scope'):
+            self.secondary_cell = ParentClass(*args, **kwargs)
         # Weights
-        # Connections between layers
-        self.input_to_hidden = tf.Variable(tf.random_normal((input_size, hidden_size), stddev=0.01, dtype=tf.float64))
-        self.hidden_to_hidden = tf.Variable(tf.random_normal((hidden_size, hidden_size), stddev=0.01, dtype=tf.float64))
-        self.hidden_to_memory = tf.Variable(tf.random_normal((hidden_size, memory_size), stddev=0.01, dtype=tf.float64))
-        self.hidden_to_hidden_from_memory = tf.Variable(tf.random_normal((hidden_size, hidden_size), stddev=0.01, dtype=tf.float64))
-        self.memory_to_hidden = tf.Variable(tf.random_normal((memory_size, hidden_size), stddev=0.01, dtype=tf.float64))
+        # Connection from hidden state to memory
+        self.hidden_to_memory = tf.Variable(tf.random_normal((self.inner_output_size, memory_size), stddev=0.01, dtype=tf.float64))
         # Special parameters
         self.salience_decay = tf.constant(0.9, tf.float64) #tf.Variable(, dtype=tf.float64)
         self.new_entity_score = tf.constant(0.5, tf.float64) #tf.Variable(, dtype=tf.float64)
         self.attention_beta = tf.constant(5., tf.float64) #tf.Variable(, dtype=tf.float64)
-        # Collect variables
-        self.weight_matrices = [self.input_to_hidden, self.hidden_to_hidden, self.hidden_to_memory, self.hidden_to_hidden_from_memory, self.memory_to_hidden]
-        self.special_parameters = [self.salience_decay, self.new_entity_score, self.attention_beta]
     
     @property
     def state_size(self):
         """
         Return the shapes of the hidden state, including the memory extension
         """
-        return (tf.TensorShape([self.hidden_size]),  # Hidden layer
-                tf.TensorShape([self.max_mentions, self.memory_size]),  # Memory vectors
+        return (tf.TensorShape([self.max_mentions, self.memory_size]),  # Memory vectors
                 tf.TensorShape([self.max_mentions]),  # Salience of memories
-                tf.TensorShape([]))  # Index of next free memory  
+                tf.TensorShape([]),  # Index of next free memory  
+                *super().state_size)  # State size of parent RNN cell
     
     @property
     def output_size(self):
         """
         Return the shapes of the output, including memory retrieval decisions
         """
-        return (tf.TensorShape([self.hidden_size]),  # Output from hidden layer
-                tf.TensorShape([self.max_mentions]))  # Memory retrieval decisions
+        return (tf.TensorShape([self.max_mentions]),  # Memory retrieval decisions
+                super().output_size)  # Output from parent RNN cell
     
     def __call__(self, inputs, state, scope=None):
         """
         Run the RNN
         :param inputs: inputs of shapes ([batch_size, input_size], [batch_size])
         :param state: tuple of state tensors
-        :param scope: VariableScope for the created subgraph; defaults to 'salience_cell'
+        :param scope: VariableScope for the created subgraph
         :return: output, new_state
         """
+        # Unpack input and state
         embedding, use_memory_float = inputs
-        hidden, memory, salience, index = state
-        new_hidden = tf.nn.relu(tf.matmul(embedding, self.input_to_hidden)
-                                + tf.matmul(hidden, self.hidden_to_hidden))
-        # Consult the memory if we've reached the end of a mention
+        memory, salience, index, *hidden = state
+        # Call the parent RNN
+        inner_output, new_hidden = super().__call__(embedding, hidden, scope) ### TODO
+        
+        ### Consult the memory if required
+        
         # Cast the bool as a float, and squeeze to a scalar
         use_memory = tf.squeeze(tf.cast(use_memory_float, tf.bool))
         # Use the memory extension only if this bool is true
         # If we don't, leave the state the same, and output zeros as a decision
-        new_new_hidden, new_memory, new_salience, new_index, decisions = tf.cond(use_memory,
-            lambda: self.check_memory(new_hidden, memory, salience, index),
-            lambda: (new_hidden, memory, salience, index, tf.zeros((1,self.max_mentions), dtype=tf.float64)))
+        new_output, decisions, new_memory, new_salience, new_index, *new_new_hidden = tf.cond(use_memory,
+            lambda: self.check_memory(inner_output, memory, salience, index, *new_hidden),
+            lambda: (inner_output, tf.zeros((1,self.max_mentions), dtype=tf.float64), memory, salience, index, *new_hidden))
 
-        return (new_new_hidden, decisions), (new_new_hidden, new_memory, new_salience, new_index)
+        return (new_output, decisions), (new_memory, new_salience, new_index, *new_new_hidden)
     
-    def check_memory(self, hidden, memory, salience, index_float):
+    def check_memory(self, inner_output, memory, salience, index_float, *hidden):
         """
         Use the memory extension
+        :param inner_output: output from parent RNN
         :param hidden: current hidden state
         :param memory: current memory
         :param salience: current salience
@@ -88,14 +96,15 @@ class SalienceMemoryRNNCell(tf.contrib.rnn.RNNCell):
         index = tf.cast(index_float, tf.int32)
         # Query over memories
         # (what activation function?)
-        query = tf.nn.relu(tf.matmul(hidden, self.hidden_to_memory))
+        query = tf.nn.relu(tf.matmul(inner_output, self.hidden_to_memory))
         # Cosine similarity between query and memories
         normed_query = tf.nn.l2_normalize(query, dim=1)
         normed_memory = tf.nn.l2_normalize(memory, dim=2)
         # (squeeze to deal with batch of size 1)
         similarity = tf.matmul(normed_query,  # [1, memory_size]
-                               tf.squeeze(normed_memory),  # [1, max_mentions, memory_size]
+                               tf.squeeze(normed_memory, 0),  # [1, max_mentions, memory_size]
                                transpose_b=True)
+        # TODO dimension size is lost after tf.squeeze...
         weighted_sim = similarity * salience
         # Take attention over these similarities,
         # with a default score for the new entity
@@ -110,18 +119,24 @@ class SalienceMemoryRNNCell(tf.contrib.rnn.RNNCell):
         memory_update = tf.expand_dims(tf.transpose(attention) * query, 0)  # Use broadcasting to do outer product
         new_memory = memory + memory_update
         # Retrieve a memory as a weighted sum, and update the hidden state
-        retrieved_memory = tf.matmul(attention, tf.squeeze(new_memory))
-        new_hidden = tf.nn.relu(tf.matmul(retrieved_memory, self.memory_to_hidden)
-                                + tf.matmul(hidden, self.hidden_to_hidden_from_memory))
+        retrieved_memory = tf.matmul(attention, tf.squeeze(new_memory, 0))
+        
+        # Use the secondary cell (of the type of the parent class) to update the hidden state
+        with tf.variable_scope('secondary_scope'):
+            new_output, new_hidden = self.secondary_cell.__call__(retrieved_memory, hidden)
+        
         # Decay the salience and increase the salience of the activated memory slot(s)
         # (There could be better ways of updating the salience)
-        #new_salience = tf.minimum(salience * self.salience_decay + attention, 1)
         new_salience = tf.maximum(salience * self.salience_decay, attention)
         # Increment the index and cast back to a float
         new_index = index+1
         new_index_float = tf.cast(new_index, tf.float64)
         
-        return new_hidden, new_memory, new_salience, new_index_float, attention
+        return (new_output, attention, new_memory, new_salience, new_index_float, *new_hidden)
+
+
+class SalienceLSTMCell(SalienceMemoryMixin, tf.contrib.rnn.LSTMCell):
+    pass
 
 
 if __name__ == '__main__':
@@ -147,7 +162,7 @@ if __name__ == '__main__':
     
     # Model
     
-    cell = SalienceMemoryRNNCell(INPUT_SIZE, HIDDEN_SIZE, MEMORY_SIZE, MAX_MENTIONS)
+    cell = SalienceLSTMCell(MEMORY_SIZE, MAX_MENTIONS, HIDDEN_SIZE)
     (outputs, decisions), last_state = tf.nn.dynamic_rnn(cell, [embeddings, mention_float], dtype=tf.float64)
     
     masked_decisions = tf.matmul(token_to_mention_float, decisions, transpose_a=True)
