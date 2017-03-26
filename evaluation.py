@@ -58,12 +58,11 @@ def write_doc(name,doc):
     output.write("#end document")
 
 def null_scores():
-    metrics = ['muc','bcub','ceafm','ceafe','blanc']
+    metrics = ['muc','bcub','ceafm','ceafe','blanc','lea']
     scores = {}
-    for metric in metrics:
-        scores[metric]=0.00
     scores["formatted"] = "\tR\tP\tF1\n"
     for metric in metrics:
+        scores[metric]=(0.00,0.00,0.00)
         scores["formatted"] += metric + "\t" + \
             "\t".join(["0.00"]*3) + "\n"
     scores["formatted"] += "\n"
@@ -72,9 +71,9 @@ def null_scores():
     return scores
 
 def get_scores(gold,test):
-    scorer_output = subprocess.check_output(["perl","/anfs/bigdisc/kh562/coref-scorer/scorer.pl",
+    scorer_output = subprocess.check_output(["perl","/anfs/bigdisc/kh562/LEA-coreference-scorer/scorer.pl",
     "all",gold,test,"none"]).decode()
-    metrics = ['muc', 'bcub', 'ceafm', 'ceafe', 'blanc']
+    metrics = ['muc', 'bcub', 'ceafm', 'ceafe', 'blanc', 'lea']
     scores,metric = {},None
     for line in scorer_output.split("\n"):
         if not line: continue
