@@ -2,25 +2,28 @@
 
 import numpy as np
 from string import digits, punctuation
-from gensim.models import Word2Vec
+import gensim
 
 from conll import ConllCorpusReader
 
 # Google's pre-trained word2vec model from GoogleNews. Note: this 
 # is a large matrix loaded into memory and may take several minutes
-model = Word2Vec.load_word2vec_format('/anfs/bigdisc/kh562/Models/GoogleNews-vectors-negative300.bin.gz', binary=True)
+model = gensim.models.KeyedVectors.load_word2vec_format('/anfs/bigdisc/kh562/Models/GoogleNews-vectors-negative300.bin.gz', binary=True)
 
 # Load CoNLL corpus
-corpus_dir = "/anfs/bigdisc/kh562/Corpora/conll-2011/"
+corpus_dir = "/anfs/bigdisc/kh562/Corpora/conll-2012/v4/data/"
 conll_reader = ConllCorpusReader(corpus_dir)
 conll_reader.parse_corpus()
 train_conll_docs = conll_reader.get_conll_docs("train")
-test_conll_docs = conll_reader.get_conll_docs("test")
+dev_conll_docs = conll_reader.get_conll_docs("development")
 
 # Translation table to convert digits to #
 digit_table = str.maketrans(digits, '#'*len(digits))
 # Translation table to remove punctuation
 punc_table = str.maketrans('', '', punctuation)
+
+train_matrices=[]
+dev_matrices=[]
 
 def get_vector(token):
     """
@@ -41,8 +44,11 @@ def get_vector(token):
     return model['</s>']
 
 # repeat for "test_conll_docs" etc
-for conll_doc in train_conll_docs:
+for conll_doc in dev_conll_docs:
     # list of numpy arrays containing vectors for each token in document
     token_vectors = [get_vector(token) for token in conll_doc.get_document_tokens()]
     # convert list of vectors to matrix
     token_vector_matrix = np.array(token_vectors)
+    dev_matrices.append(token_vector_matrix)
+
+np.savez("/anfs/bigdisc/kh562/Corpora/conll-2012/development_docs",matrices=dev_matrices)
