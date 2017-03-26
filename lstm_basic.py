@@ -9,7 +9,7 @@ from conll import ConllCorpusReader
 from matrix_gen import get_s_matrix, coref_matrix
 from evaluation import get_evaluation
 
-corpus_dir = "/anfs/bigdisc/kh562/Corpora/conll-2011/"
+corpus_dir = "/anfs/bigdisc/kh562/Corpora/conll-2012/v4/data/"
 conll_reader = ConllCorpusReader(corpus_dir).parse_corpus()
 
 tf.set_random_seed(1234)
@@ -76,8 +76,8 @@ init = tf.initialize_all_variables()  # Must be done AFTER introducing the optim
 
 with tf.Session() as sess:
     # code to load the cached document vectors
-    train_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2011/training_docs.npz", encoding='latin1')["matrices"]
-    test_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2011/test_docs.npz", encoding='latin1')["matrices"]
+    train_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/training_docs.npz", encoding='latin1')["matrices"]
+    dev_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/development_docs.npz", encoding='latin1')["matrices"]
 
     train_conll_docs = conll_reader.get_conll_docs("train")
     train_s_matrix = [get_s_matrix(x) for x in train_conll_docs]
@@ -86,9 +86,9 @@ with tf.Session() as sess:
 #    print(nonzero)
 #    print(train_conll_docs[0].get_document_tokens()[nonzero.min():nonzero.max()+1])
 
-    test_conll_docs = conll_reader.get_conll_docs("test")
-    test_s_matrix = [get_s_matrix(x) for x in test_conll_docs]
-    test_coref_matrix = [coref_matrix(x) for x in test_conll_docs]
+    dev_conll_docs = conll_reader.get_conll_docs("development")
+    dev_s_matrix = [get_s_matrix(x) for x in dev_conll_docs]
+    dev_coref_matrix = [coref_matrix(x) for x in dev_conll_docs]
 
     sess.run(init)
     print("Starting session")
@@ -104,8 +104,8 @@ with tf.Session() as sess:
 #            print("Epoch {}\nMinibatch loss {:.6f}\nTraining acc {:.5f}".format(step+1, loss, acc))
             print("Epoch {}\nDocument {}\nMinibatch loss {:.6f}".format(step+1, i, loss))
 
-        for i in range(len(test_docs)):
-            current_dict = {x: test_docs[i], y: test_coref_matrix[i], s: test_s_matrix[i]}
+        for i in range(len(dev_docs)):
+            current_dict = {x: dev_docs[i], y: dev_coref_matrix[i], s: dev_s_matrix[i]}
             loss = sess.run(error_rate, feed_dict=current_dict)
             print("Document {}\nLoss {:.6f}".format(i, loss))
             
