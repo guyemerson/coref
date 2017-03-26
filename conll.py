@@ -74,19 +74,27 @@ class ConllCorpusReader:
     def __init__(self,root_dir):
         self.root_dir = root_dir
         self.train_conll_docs = []
+        self.dev_conll_docs=[]
         self.test_conll_docs = []
 
     def add_conll_doc(self,conll_doc,option):
         if option == "train":
             self.train_conll_docs.append(conll_doc)
+        elif option == "development":
+            self.dev_conll_docs.append(conll_doc)
         else:
             self.test_conll_docs.append(conll_doc)
 
     def get_conll_docs(self,option):
-        return self.train_conll_docs if option == "train" else self.test_conll_docs
+        if option=="train":
+            return self.train_conll_docs
+        elif option=="development":
+            return self.dev_conll_docs
+        else:
+            return self.test_conll_docs
         
     def get_doc_list(self,option):
-        return sorted([os.path.join(r,d) for r, _, ds in os.walk(self.root_dir+option) for d in ds if d.endswith("gold_conll")])
+        return sorted([os.path.join(r,d) for r, _, ds in os.walk(self.root_dir+option+"/data/english/annotations") for d in ds if d.endswith("gold_conll")])
 
     def get_conll_doc_parts(self,doc):
         conll_doc_parts = []
@@ -118,9 +126,9 @@ class ConllCorpusReader:
             for conll_doc in self.get_conll_doc_parts(doc):
                 self.parse_conll_doc(conll_doc)
                 self.add_conll_doc(conll_doc,"train")
-        for doc in self.get_doc_list("test"):
+        for doc in self.get_doc_list("development"):
             for conll_doc in self.get_conll_doc_parts(doc):
                 self.parse_conll_doc(conll_doc)
-                self.add_conll_doc(conll_doc,"test")
+                self.add_conll_doc(conll_doc,"development")
         logging.info("parsing complete")
         return self
