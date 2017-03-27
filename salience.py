@@ -77,11 +77,11 @@ class SalienceMemoryMixin(tf.contrib.rnn.RNNCell):
         use_memory = tf.squeeze(tf.cast(use_memory_float, tf.bool))
         # Use the memory extension only if this bool is true
         # If we don't, leave the state the same, and output zeros as a decision
-        new_output, decisions, new_memory, new_salience, new_index, *new_new_hidden = tf.cond(use_memory,
+        decisions, new_output, new_memory, new_salience, new_index, *new_new_hidden = tf.cond(use_memory,
             lambda: self.check_memory(inner_output, memory, salience, index, *new_hidden),
-            lambda: (inner_output, tf.zeros((1,self.max_mentions), dtype=tf.float64), memory, salience, index, *new_hidden))
+            lambda: (tf.zeros((1,self.max_mentions), dtype=tf.float64), inner_output, memory, salience, index, *new_hidden))
 
-        return (new_output, decisions), (new_memory, new_salience, new_index, *new_new_hidden)
+        return (decisions, new_output), (new_memory, new_salience, new_index, *new_new_hidden)
     
     def check_memory(self, inner_output, memory, salience, index_float, *hidden):
         """
@@ -104,7 +104,6 @@ class SalienceMemoryMixin(tf.contrib.rnn.RNNCell):
         similarity = tf.matmul(normed_query,  # [1, memory_size]
                                tf.squeeze(normed_memory, 0),  # [1, max_mentions, memory_size]
                                transpose_b=True)
-        # TODO dimension size is lost after tf.squeeze...
         weighted_sim = similarity * salience
         # Take attention over these similarities,
         # with a default score for the new entity
@@ -132,7 +131,7 @@ class SalienceMemoryMixin(tf.contrib.rnn.RNNCell):
         new_index = index+1
         new_index_float = tf.cast(new_index, tf.float64)
         
-        return (new_output, attention, new_memory, new_salience, new_index_float, *new_hidden)
+        return (attention, new_output, new_memory, new_salience, new_index_float, *new_hidden)
 
 
 class SalienceLSTMCell(SalienceMemoryMixin, tf.contrib.rnn.LSTMCell):
@@ -163,7 +162,7 @@ if __name__ == '__main__':
     # Model
     
     cell = SalienceLSTMCell(MEMORY_SIZE, MAX_MENTIONS, HIDDEN_SIZE)
-    (outputs, decisions), last_state = tf.nn.dynamic_rnn(cell, [embeddings, mention_float], dtype=tf.float64)
+    (decisions, outputs), last_state = tf.nn.dynamic_rnn(cell, [embeddings, mention_float], dtype=tf.float64)
     
     masked_decisions = tf.matmul(token_to_mention_float, decisions, transpose_a=True)
     
