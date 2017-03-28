@@ -101,11 +101,10 @@ with tf.Session() as sess:
             coref_mat = sess.run(nonneg_sim, feed_dict=current_dict)
             # get evaluation of current predicted coref matrix
             print(get_evaluation(train_conll_docs[i],coref_mat,THRESHOLD)["formatted"])
-#            print("Epoch {}\nMinibatch loss {:.6f}\nTraining acc {:.5f}".format(step+1, loss, acc))
+            # print("Epoch {}\nMinibatch loss {:.6f}\nTraining acc {:.5f}".format(step+1, loss, acc))
             print("Epoch {}\nDocument {}\nMinibatch loss {:.6f}".format(step+1, i, loss))
 
-        for i in range(len(dev_docs)):
+        for i in range(len(dev_conll_docs)):
             current_dict = {x: dev_docs[i], y: dev_coref_matrix[i], s: dev_s_matrix[i]}
             loss = sess.run(error_rate, feed_dict=current_dict)
             print("Document {}\nLoss {:.6f}".format(i, loss))
-            
