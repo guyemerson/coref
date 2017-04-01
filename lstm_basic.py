@@ -74,7 +74,7 @@ nonneg_sim = tf.nn.relu(dot_product)
 # cost = tf.nn.l2_loss(nonneg_sim - y)
 
 # NEW COST (cross entropy)
-cost =  - (1/tf.size(y)) * tf.reduce_sum(y*tf.log(nonneg_sim+(1e-10)) + (1-y)*tf.log(1+(1e-10)-nonneg_sim))
+cost =  - tf.reduce_sum(y*tf.log(nonneg_sim+(1e-10)) + (1-y)*tf.log(1+(1e-10)-nonneg_sim)) / tf.cast(tf.size(y), tf.float64)
 reg = REGULARIZATION_WEIGHT*sum([tf.reduce_sum(x**2) for x in tf.trainable_variables()])
 cost = cost + reg
 
@@ -116,8 +116,7 @@ with tf.Session() as sess:
             current_dict = {x: train_docs[i], y: train_coref_matrix[i], s: train_s_matrix[i]}
             sess.run(optimizer, feed_dict=current_dict)
 
-            loss = sess.run(cost, feed_dict=current_dict)
-            coref_mat = sess.run(nonneg_sim, feed_dict=current_dict)
+            loss, coref_mat = sess.run([cost, nonneg_sim], feed_dict=current_dict)
             # get evaluation of current predicted coref matrix
             losses_this_epoch.append(loss)
             evals = get_evaluation(train_conll_docs[i],coref_mat,THRESHOLD)
