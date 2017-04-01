@@ -74,9 +74,15 @@ nonneg_sim = tf.nn.relu(dot_product)
 # cost = tf.nn.l2_loss(nonneg_sim - y)
 
 # NEW COST (cross entropy)
+
 cost =  - tf.reduce_sum(y*tf.log(nonneg_sim+(1e-10)) + (1-y)*tf.log(1+(1e-10)-nonneg_sim)) / tf.cast(tf.size(y), tf.float64)
 reg = REGULARIZATION_WEIGHT*sum([tf.reduce_sum(x**2) for x in tf.trainable_variables()])
 cost = cost + reg
+# cost1 =  y*tf.log(nonneg_sim+(1e-10))
+# cost2 =  (1-y)*tf.log(1+(1e-10)-nonneg_sim)
+# cost3 =  - tf.reduce_sum(y*tf.log(nonneg_sim+(1e-10)) + (1-y)*tf.log(1+(1e-10)-nonneg_sim))
+# cost4 =  tf.cast(tf.size(y), tf.float64)
+
 
 # TODO: currently the importance of a document grows quadratically with the number of referring expressions
 
@@ -112,8 +118,12 @@ with tf.Session() as sess:
     for step in range(EPOCHS):
         metrics_this_epoch = defaultdict(lambda: defaultdict(list))
         losses_this_epoch = []
+        skipped = 0
         for i in range(len(train_conll_docs)):
             current_dict = {x: train_docs[i], y: train_coref_matrix[i], s: train_s_matrix[i]}
+            if train_coref_matrix[i].size == 0:
+                skipped += 1
+                continue
             sess.run(optimizer, feed_dict=current_dict)
 
             loss, coref_mat = sess.run([cost, nonneg_sim], feed_dict=current_dict)
@@ -148,14 +158,19 @@ with tf.Session() as sess:
         formatted += "conll\t\t\t" + format(avg_scores['conll']['avg'], '.2f') + "\n"
         print("AVERAGE METRICS FOR EPOCH", step+1)
         print(formatted)
-        print("AVERAGE LOSS FOR EPOCH{}\n{:.6f}".format(step+1, avg_loss))
+        print("AVERAGE LOSS FOR EPOCH {}\n{:.6f}".format(step+1, avg_loss))
+        print("Skipped {} documents with zero mentions".format(skipped))
 
         print("Saving model")
-        saver.save(sess, args.model_dir + '/' + 'model_' + str(LEARNING_RATE) + '_' + str(EPOCHS) + '_' + str(NUM_HIDDEN) + '_' + str(REGULARIZATION_WEIGHT))
+        saver.save(sess, args.model_dir + '/' + 'model_' + str(LEARNING_RATE) + '_' + str(EPOCHS) + '_' + str(NUM_HIDDEN) + '_' + str(REGULARIZATION_WEIGHT) + '_epoch' + str(step+1))
 
     print("Evaluating on dev set\n")
+    skipped = 0
     for i in range(len(dev_conll_docs)):
         current_dict = {x: dev_docs[i], y: dev_coref_matrix[i], s: dev_s_matrix[i]}
+        if dev_coref_matrix[i].size == 0:
+            skipped += 1
+            continue
         loss = sess.run(cost, feed_dict=current_dict)
         if args.print_dev_loss:
             print("Document {}\nLoss {:.6f}".format(i, loss))
@@ -186,3 +201,4 @@ with tf.Session() as sess:
     print("AVERAGE METRICS ON DEV SET")
     print(formatted)
     print("AVERAGE LOSS ON DEV SET\n{:.6f}".format(avg_loss))     
+    print("Skipped {} documents with zero mentions".format(skipped))
