@@ -21,6 +21,7 @@ parser.add_argument("--hidden_size", help="Number of hidden units", default=600)
 parser.add_argument("--threshold", help="Threshold value for coference (between 0 and 1)", default=0.79)
 parser.add_argument("--reg_weight", help="The weight of regularization function", default=0.1)
 parser.add_argument("--print_coref_matrices", help="Print gold and predicted coreference matrices", action="store_true")
+parser.add_argument("--additional_features",help="Use vectors containing additional features",action="store_true")
 parser.add_argument("--model_dir", help="Directory for saving models", default="models")
 args = parser.parse_args()
 
@@ -35,8 +36,8 @@ tf.set_random_seed(99)
 
 LEARNING_RATE = float(args.learning_rate)
 EPOCHS = int(args.epochs)
-# TODO: input size to be set to 300 when using cached vectors (i.e. real data)
-INPUT_SIZE = 300
+# TODO: input size to be set to 300 when using Google news embeddings else 304 avec additional features
+INPUT_SIZE = 304 if args.additional_features else 300
 NUM_HIDDEN = int(args.hidden_size)
 # threshold for cosine similarity on coref matrix (C) 
 THRESHOLD=float(args.threshold)
@@ -99,8 +100,12 @@ with tf.Session() as sess:
     saver = tf.train.Saver()
     
     # code to load the cached document vectors
-    train_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/training_docs.npz", encoding='latin1')["matrices"]
-    dev_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/development_docs.npz", encoding='latin1')["matrices"]
+    if args.additional_features:
+        train_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/training_docs_new.npz", encoding='latin1')["matrices"]
+        dev_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/development_docs_new.npz", encoding='latin1')["matrices"]
+    else:
+        train_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/training_docs.npz", encoding='latin1')["matrices"]
+        dev_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/development_docs.npz", encoding='latin1')["matrices"]
 
     train_conll_docs = conll_reader.get_conll_docs("train")
     train_s_matrix = [get_s_matrix(x) for x in train_conll_docs]
