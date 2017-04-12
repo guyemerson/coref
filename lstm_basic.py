@@ -26,7 +26,7 @@ parser.add_argument("--model_dir", help="Directory for saving models", default="
 parser.add_argument("--eval_on_model", help="Path to the model", default="none")
 args = parser.parse_args()
 
-corpus_dir = "/anfs/bigdisc/kh562/Corpora/conll-2012/v4/data/"
+corpus_dir = "/anfs/bigdisc/kh562/Corpora/conll-2012/"
 conll_reader = ConllCorpusReader(corpus_dir).parse_corpus()
 
 metrics = ['muc', 'bcub', 'ceafm', 'ceafe', 'blanc', 'lea']
@@ -37,8 +37,8 @@ tf.set_random_seed(99)
 
 LEARNING_RATE = float(args.learning_rate)
 EPOCHS = int(args.epochs)
-# TODO: input size to be set to 300 when using Google news embeddings else 304 avec additional features
-INPUT_SIZE = 304 if args.additional_features else 300
+# TODO: input size to be set to 300 when using Google news embeddings else 362 avec additional features
+INPUT_SIZE = 362 if args.additional_features else 300
 NUM_HIDDEN = int(args.hidden_size)
 # threshold for cosine similarity on coref matrix (C) 
 THRESHOLD=float(args.threshold)
@@ -97,13 +97,15 @@ init = tf.initialize_all_variables()  # Must be done AFTER introducing the optim
 
 ### Run the model
 
-    # code to load the cached document vectors
+# code to load the cached document vectors
 if args.additional_features:
     train_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/training_docs_new.npz", encoding='latin1')["matrices"]
     dev_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/development_docs_new.npz", encoding='latin1')["matrices"]
+    test_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/test_docs_new.npz", encoding='latin1')["matrices"]
 else:
     train_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/training_docs.npz", encoding='latin1')["matrices"]
     dev_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/development_docs.npz", encoding='latin1')["matrices"]
+    test_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/test_docs.npz", encoding='latin1')["matrices"]
 
 train_conll_docs = conll_reader.get_conll_docs("train")
 train_s_matrix = [get_s_matrix(x) for x in train_conll_docs]
@@ -151,8 +153,7 @@ if(args.eval_on_model=='none'):
                     if args.print_minibatch_loss:
 		        # print("Epoch {}\nMinibatch loss {:.6f}\nTraining acc {:.5f}".format(step+1, loss, acc))
                         print("Epoch {}\nDocument {}\nMinibatch loss {:.6f}".format(step+1, i, loss))
-
-                        avg_scores = defaultdict(lambda: defaultdict(float))
+                avg_scores = defaultdict(lambda: defaultdict(float))
                 for m in metrics_this_epoch:
                     for t in metrics_this_epoch[m]:
                         avg_scores[m][t] = sum(metrics_this_epoch[m][t]) / len(metrics_this_epoch[m][t])
