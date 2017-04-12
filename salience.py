@@ -147,6 +147,8 @@ if __name__ == '__main__':
     INPUT_SIZE = 7
     HIDDEN_SIZE = 5
     MEMORY_SIZE = 4
+    
+    # true MAX_MENTIONS = 522
     MAX_MENTIONS = 5
     
     # Input data
