@@ -1,4 +1,4 @@
-import os, logging, re
+import os, logging, re, codecs
 
 logging.basicConfig(level=logging.INFO,format='%(asctime)s %(levelname)s %(''message)s')
 
@@ -7,6 +7,8 @@ __author__="kevin heffernan"
 class ConllDocument:
     def __init__(self,content):
         self.sents = []
+        self.pos_tags = []
+        self.speakers = []
         self.coref_chain = {}
         self.open_mentions = []
         self.content = content
@@ -82,23 +84,23 @@ class ConllCorpusReader:
             self.train_conll_docs.append(conll_doc)
         elif option == "development":
             self.dev_conll_docs.append(conll_doc)
-        else:
+        elif option == "test":
             self.test_conll_docs.append(conll_doc)
 
     def get_conll_docs(self,option):
-        if option=="train":
+        if option == "train":
             return self.train_conll_docs
-        elif option=="development":
+        elif option == "development":
             return self.dev_conll_docs
-        else:
+        elif option == "test":
             return self.test_conll_docs
         
     def get_doc_list(self,option):
-        return sorted([os.path.join(r,d) for r, _, ds in os.walk(self.root_dir+option+"/data/english/annotations") for d in ds if d.endswith("gold_conll")])
+        return sorted([os.path.join(r,d) for r, _, ds in os.walk(self.root_dir+"v4/data/"+option+"/data/english/annotations") for d in ds if d.endswith("gold_conll")])
 
     def get_conll_doc_parts(self,doc):
         conll_doc_parts = []
-        for line in open(doc,"r"):
+        for line in codecs.open(doc,"r","utf-8"):
             if line.startswith("#begin document"):
                 content = []
             elif line.startswith("#end document"):
@@ -116,19 +118,22 @@ class ConllCorpusReader:
                 sent = []
                 sent_index+=1
             else:
-                token_index,token,chains = int(line.split()[2]),line.split()[3],line.split()[-1]
+                token_index,token,pos,speaker,chains = int(line.split()[2]),line.split()[3],line.split()[4],line.split()[9],line.split()[-1]
                 conll_doc.update_coref_chains(sent_index,token_index,token,chains)
                 sent.append(token) if token != "/." else sent.append(".")
+                conll_doc.pos_tags.append(pos)
+                conll_doc.speakers.append(speaker)
+
+    def parse_docs(self,option):
+        logging.info("parsing "+option+" docs")
+        for doc in self.get_doc_list(option):
+            for conll_doc in self.get_conll_doc_parts(doc):
+                self.parse_conll_doc(conll_doc)
+                self.add_conll_doc(conll_doc,option)
             
     def parse_corpus(self):
-        logging.info("parsing corpus")
-        for doc in self.get_doc_list("train"):
-            for conll_doc in self.get_conll_doc_parts(doc):
-                self.parse_conll_doc(conll_doc)
-                self.add_conll_doc(conll_doc,"train")
-        for doc in self.get_doc_list("development"):
-            for conll_doc in self.get_conll_doc_parts(doc):
-                self.parse_conll_doc(conll_doc)
-                self.add_conll_doc(conll_doc,"development")
+        self.parse_docs("train")
+        self.parse_docs("development")
+        self.parse_docs("test")
         logging.info("parsing complete")
         return self
