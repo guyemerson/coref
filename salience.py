@@ -1,6 +1,33 @@
 import numpy as np
 import tensorflow as tf
+import argparse
+from collections import defaultdict
 
+from conll import ConllCorpusReader
+from matrix_gen import get_s_matrix, coref_matrix
+from evaluation import get_evaluation
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--print_document_scores", help="Print metrics per document during training", action="store_true")
+parser.add_argument("--print_minibatch_loss", help="Print minibatch (document) loss during training", action="store_true")
+parser.add_argument("--print_dev_loss", help="Print minibatch (document) loss during evaluation on the dev set", action="store_true")
+parser.add_argument("--epochs", help="Number of training epochs", default=20)
+parser.add_argument("--learning_rate", help="Learning rate for training", default=0.1)
+parser.add_argument("--hidden_size", help="Number of hidden units", default=600)
+parser.add_argument("--threshold", help="Threshold value for coference (between 0 and 1)", default=0.79)
+parser.add_argument("--reg_weight", help="The weight of regularization function", default=0.1)
+parser.add_argument("--print_coref_matrices", help="Print gold and predicted coreference matrices", action="store_true")
+parser.add_argument("--additional_features",help="Use vectors containing additional features",action="store_true")
+parser.add_argument("--model_dir", help="Directory for saving models", default="models")
+parser.add_argument("--eval_on_model", help="Path to the model", default="none")
+args = parser.parse_args()
+
+corpus_dir = "/anfs/bigdisc/kh562/Corpora/conll-2012/"
+conll_reader = ConllCorpusReader(corpus_dir).parse_corpus()
+
+metrics = ['muc', 'bcub', 'ceafm', 'ceafe', 'blanc', 'lea']
+
+tf.set_random_seed(99)
 
 class SalienceMemoryMixin(tf.contrib.rnn.RNNCell):
     """
@@ -141,21 +168,41 @@ class SalienceLSTMCell(SalienceMemoryMixin, tf.contrib.rnn.LSTMCell):
 if __name__ == '__main__':
     # Hyperparameters
     
-    LEARNING_RATE = 0.001
-    REGULARIZATION = 0.
+    LEARNING_RATE = float(args.learning_rate)
+    EPOCHS = int(args.epochs)
+    REGULARIZATION = float(args.reg_weight)
     
-    INPUT_SIZE = 7
-    HIDDEN_SIZE = 5
-    MEMORY_SIZE = 4
+    INPUT_SIZE = 362 if args.additional_features else 300
+    HIDDEN_SIZE = int(args.hidden_size)
+    MEMORY_SIZE = int(args.hidden_size)
     
     # true MAX_MENTIONS = 522
-    MAX_MENTIONS = 5
+    MAX_MENTIONS = 522
+
+    # code to load the cached document vectors
+    if args.additional_features:
+        train_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/training_docs_new.npz", encoding='latin1')["matrices"]
+        dev_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/development_docs_new.npz", encoding='latin1')["matrices"]
+        test_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/test_docs_new.npz", encoding='latin1')["matrices"]
+    else:
+        train_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/training_docs.npz", encoding='latin1')["matrices"]
+        dev_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/development_docs.npz", encoding='latin1')["matrices"]
+        test_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/test_docs.npz", encoding='latin1')["matrices"]
+
+    train_conll_docs = conll_reader.get_conll_docs("train")
+    train_s_matrix = [get_s_matrix(x) for x in train_conll_docs]
+    train_coref_matrix = [coref_matrix(x) for x in train_conll_docs]
+
+    dev_conll_docs = conll_reader.get_conll_docs("development")
+    dev_s_matrix = [get_s_matrix(x) for x in dev_conll_docs]
+    dev_coref_matrix = [coref_matrix(x) for x in dev_conll_docs]
+
     
     # Input data
     
-    token_to_mention = tf.placeholder(tf.bool, [1, None, None])  # [batch_size, num_tokens, num_mentions]
-    embeddings = tf.placeholder(tf.float64, [1, None, INPUT_SIZE])  # embeddings [batch_size, num_tokens, input_size]
-    gold = tf.placeholder(tf.bool, [1, None, None])  # [batch_size, num_mentions, num_mentions]
+    token_to_mention = tf.placeholder(tf.bool, [1, None, None])  # [batch_size, num_tokens, num_mentions] ( = transpose of s in lstm_basic)
+    embeddings = tf.placeholder(tf.float64, [1, None, INPUT_SIZE])  # embeddings [batch_size, num_tokens, input_size] ( = x in lstm_basic)
+    gold = tf.placeholder(tf.bool, [1, None, None])  # [batch_size, num_mentions, num_mentions] ( = y in lstm_basic)
     
     gold_float = tf.cast(gold, tf.float64)
     token_to_mention_float = tf.cast(token_to_mention, tf.float64)
@@ -178,7 +225,9 @@ if __name__ == '__main__':
     
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
-        
+        print("Starting session")
+        print("Input size is", INPUT_SIZE)
+
         # Toy data
         toy_embeddings = np.random.random((1,11,INPUT_SIZE))
         toy_token_to_mention = np.zeros((1,11,3), dtype=np.bool)
@@ -189,10 +238,10 @@ if __name__ == '__main__':
         toy_gold[0,0,1] = 1
         toy_gold[0,1,0] = 1
         
-        feed_dict = {embeddings: toy_embeddings,
-                     token_to_mention: toy_token_to_mention,
-                     gold: toy_gold}
-        
+#        feed_dict = {embeddings: toy_embeddings,
+#                     token_to_mention: toy_token_to_mention,
+#                     gold: toy_gold}
+
         def print_forward_pass():
             decision_mat, final_state, this_cost = sess.run([decisions, last_state, cost], feed_dict=feed_dict)
             print('outputs:')
@@ -203,11 +252,17 @@ if __name__ == '__main__':
                 print(s)
             print('cost:')
             print(this_cost)
+
+        for step in range(EPOCHS):
+            skipped = 0
+            for i in range(len(train_conll_docs)):
+                feed_dict = {embeddings: np.expand_dims(train_docs[i], axis=0), token_to_mention: np.expand_dims(train_s_matrix[i], axis=0), gold: np.expand_dims(train_coref_matrix[i], axis=0)}
+                print("Train docs", tf.expand_dims(train_docs[i], 0).get_shape())
+                print("Train s matrix", tf.expand_dims(train_s_matrix[i], 0).get_shape())
+                print("Gold", tf.expand_dims(train_coref_matrix[i], 0).get_shape())
+                if train_coref_matrix[i].size == 0:
+                    skipped += 1
+                    continue
+                sess.run(optimizer, feed_dict=feed_dict)
+                print_forward_pass()
         
-        print_forward_pass()
-        
-        for _ in range(10):
-            sess.run(optimizer, feed_dict=feed_dict)
-        
-        
-        print_forward_pass()
