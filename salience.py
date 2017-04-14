@@ -242,27 +242,36 @@ if __name__ == '__main__':
 #                     token_to_mention: toy_token_to_mention,
 #                     gold: toy_gold}
 
-        def print_forward_pass():
-            decision_mat, final_state, this_cost = sess.run([decisions, last_state, cost], feed_dict=feed_dict)
-            print('outputs:')
-            print(decision_mat)
-            print('final state:')
-            for i, s in enumerate(final_state):
-                print(i)
-                print(s)
-            print('cost:')
-            print(this_cost)
-
         for step in range(EPOCHS):
             skipped = 0
             for i in range(len(train_conll_docs)):
-                feed_dict = {embeddings: np.expand_dims(train_docs[i], axis=0), token_to_mention: np.expand_dims(train_s_matrix[i], axis=0), gold: np.expand_dims(train_coref_matrix[i], axis=0)}
+
                 print("Train docs", tf.expand_dims(train_docs[i], 0).get_shape())
                 print("Train s matrix", tf.expand_dims(train_s_matrix[i], 0).get_shape())
                 print("Gold", tf.expand_dims(train_coref_matrix[i], 0).get_shape())
+                
+                new_embeddings = np.expand_dims(train_docs[i], axis=0)
+                new_gold = np.expand_dims(train_coref_matrix[i], axis=0)
+                new_token_to_mention = np.expand_dims(train_s_matrix[i].transpose(), axis=0)
+                feed_dict = {embeddings: new_embeddings,
+                     token_to_mention: new_token_to_mention,
+                     gold: new_gold}
+
                 if train_coref_matrix[i].size == 0:
                     skipped += 1
                     continue
                 sess.run(optimizer, feed_dict=feed_dict)
+
+                def print_forward_pass():
+                    decision_mat, final_state, this_cost = sess.run([decisions, last_state, cost], feed_dict=feed_dict)
+                    print('outputs:')
+                    print(decision_mat)
+                    print('final state:')
+                    for i, s in enumerate(final_state):
+                        print(i)
+                        print(s)
+                    print('cost:')
+                    print(this_cost)
+
                 print_forward_pass()
         
