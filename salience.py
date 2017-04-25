@@ -4,7 +4,7 @@ import argparse
 from collections import defaultdict
 
 from conll import ConllCorpusReader
-from matrix_gen import get_s_matrix, coref_matrix
+from matrix_gen import get_mention_matrix, coref_matrix
 from evaluation import get_evaluation
 
 parser = argparse.ArgumentParser()
@@ -190,17 +190,17 @@ if __name__ == '__main__':
         test_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/test_docs.npz", encoding='latin1')["matrices"]
 
     train_conll_docs = conll_reader.get_conll_docs("train")
-    train_s_matrix = [get_s_matrix(x) for x in train_conll_docs]
+    train_mention_matrix = [get_mention_matrix(x) for x in train_conll_docs]
     train_coref_matrix = [coref_matrix(x) for x in train_conll_docs]
 
     dev_conll_docs = conll_reader.get_conll_docs("development")
-    dev_s_matrix = [get_s_matrix(x) for x in dev_conll_docs]
+    dev_mention_matrix = [get_mention_matrix(x) for x in dev_conll_docs]
     dev_coref_matrix = [coref_matrix(x) for x in dev_conll_docs]
 
     
     # Input data
     
-    token_to_mention = tf.placeholder(tf.bool, [1, None, None])  # [batch_size, num_tokens, num_mentions] ( = transpose of s in lstm_basic)
+    token_to_mention = tf.placeholder(tf.bool, [1, None, None])  # [batch_size, num_tokens, num_mentions] ( = transpose of s in lstm_basic, also uses a different format to signal token-mention relationship)
     embeddings = tf.placeholder(tf.float64, [1, None, INPUT_SIZE])  # embeddings [batch_size, num_tokens, input_size] ( = x in lstm_basic)
     gold = tf.placeholder(tf.bool, [1, None, None])  # [batch_size, num_mentions, num_mentions] ( = y in lstm_basic)
     
@@ -247,12 +247,12 @@ if __name__ == '__main__':
             for i in range(len(train_conll_docs)):
 
                 print("Train docs", tf.expand_dims(train_docs[i], 0).get_shape())
-                print("Train s matrix", tf.expand_dims(train_s_matrix[i], 0).get_shape())
+                print("Train s matrix", tf.expand_dims(train_mention_matrix[i], 0).get_shape())
                 print("Gold", tf.expand_dims(train_coref_matrix[i], 0).get_shape())
                 
                 new_embeddings = np.expand_dims(train_docs[i], axis=0)
                 new_gold = np.expand_dims(train_coref_matrix[i], axis=0)
-                new_token_to_mention = np.expand_dims(train_s_matrix[i].transpose(), axis=0)
+                new_token_to_mention = np.expand_dims(train_mention_matrix[i].transpose(), axis=0)
                 feed_dict = {embeddings: new_embeddings,
                      token_to_mention: new_token_to_mention,
                      gold: new_gold}
