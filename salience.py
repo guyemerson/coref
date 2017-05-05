@@ -1,33 +1,5 @@
 import numpy as np
 import tensorflow as tf
-import argparse
-from collections import defaultdict
-
-from conll import ConllCorpusReader
-from matrix_gen import get_mention_matrix, coref_matrix
-from evaluation import get_evaluation
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--print_document_scores", help="Print metrics per document during training", action="store_true")
-parser.add_argument("--print_minibatch_loss", help="Print minibatch (document) loss during training", action="store_true")
-parser.add_argument("--print_dev_loss", help="Print minibatch (document) loss during evaluation on the dev set", action="store_true")
-parser.add_argument("--epochs", help="Number of training epochs", default=20)
-parser.add_argument("--learning_rate", help="Learning rate for training", default=0.1)
-parser.add_argument("--hidden_size", help="Number of hidden units", default=600)
-parser.add_argument("--threshold", help="Threshold value for coference (between 0 and 1)", default=0.79)
-parser.add_argument("--reg_weight", help="The weight of regularization function", default=0.1)
-parser.add_argument("--print_coref_matrices", help="Print gold and predicted coreference matrices", action="store_true")
-parser.add_argument("--additional_features",help="Use vectors containing additional features",action="store_true")
-parser.add_argument("--model_dir", help="Directory for saving models", default="models")
-parser.add_argument("--eval_on_model", help="Path to the model", default="none")
-args = parser.parse_args()
-
-corpus_dir = "/anfs/bigdisc/kh562/Corpora/conll-2012/"
-conll_reader = ConllCorpusReader(corpus_dir).parse_corpus()
-
-metrics = ['muc', 'bcub', 'ceafm', 'ceafe', 'blanc', 'lea']
-
-tf.set_random_seed(99)
 
 class SalienceMemoryMixin(tf.contrib.rnn.RNNCell):
     """
@@ -96,7 +68,7 @@ class SalienceMemoryMixin(tf.contrib.rnn.RNNCell):
         embedding, use_memory_float = inputs
         memory, salience, index, *hidden = state
         # Call the parent RNN
-        inner_output, new_hidden = super().__call__(embedding, hidden, scope) ### TODO
+        inner_output, new_hidden = super().__call__(embedding, hidden, scope)
         
         ### Consult the memory if required
         
@@ -122,8 +94,8 @@ class SalienceMemoryMixin(tf.contrib.rnn.RNNCell):
         # Cast index from float to int
         index = tf.cast(index_float, tf.int32)
         # Query over memories
-        # (what activation function?)
-        query = tf.nn.relu(tf.matmul(inner_output, self.hidden_to_memory))
+        # (TODO - choice of activation function?)
+        query = tf.tanh(tf.matmul(inner_output, self.hidden_to_memory))
         # Cosine similarity between query and memories
         normed_query = tf.nn.l2_normalize(query, dim=1)
         normed_memory = tf.nn.l2_normalize(memory, dim=2)
@@ -166,6 +138,36 @@ class SalienceLSTMCell(SalienceMemoryMixin, tf.contrib.rnn.LSTMCell):
 
 
 if __name__ == '__main__':
+    import argparse, os
+    from conll import ConllCorpusReader
+    from matrix_gen import get_mention_matrix, coref_matrix
+    from evaluation import get_evaluation
+    
+    # Command line options
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--print_document_scores", help="Print metrics per document during training", action="store_true")
+    parser.add_argument("--print_minibatch_loss", help="Print minibatch (document) loss during training", action="store_true")
+    parser.add_argument("--print_dev_loss", help="Print minibatch (document) loss during evaluation on the dev set", action="store_true")
+    parser.add_argument("--epochs", help="Number of training epochs", default=20)
+    parser.add_argument("--learning_rate", help="Learning rate for training", default=0.1)
+    parser.add_argument("--hidden_size", help="Number of hidden units", default=600)
+    parser.add_argument("--threshold", help="Threshold value for coference (between 0 and 1)", default=0.79)
+    parser.add_argument("--reg_weight", help="The weight of regularization function", default=1e-7)
+    parser.add_argument("--print_coref_matrices", help="Print gold and predicted coreference matrices", action="store_true")
+    parser.add_argument("--additional_features",help="Use vectors containing additional features",action="store_true")
+    parser.add_argument("--model_dir", help="Directory for saving models", default="models")
+    parser.add_argument("--eval_on_model", help="Path to the model", default="none")
+    args = parser.parse_args()
+    
+    # Data
+    corpus_dir = "/anfs/bigdisc/kh562/Corpora/conll-2012/"
+    conll_reader = ConllCorpusReader(corpus_dir).parse_corpus()
+    
+    # Evaluation metrics (TODO not currently used...)
+    metrics = ['muc', 'bcub', 'ceafm', 'ceafe', 'blanc', 'lea']
+    
+    tf.set_random_seed(99)
+    
     # Hyperparameters
     
     LEARNING_RATE = float(args.learning_rate)
@@ -181,14 +183,18 @@ if __name__ == '__main__':
 
     # code to load the cached document vectors
     if args.additional_features:
-        train_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/training_docs_new.npz", encoding='latin1')["matrices"]
-        dev_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/development_docs_new.npz", encoding='latin1')["matrices"]
-        test_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/test_docs_new.npz", encoding='latin1')["matrices"]
+        train_docs = np.load(os.path.join(corpus_dir, "training_docs_new.npz"), encoding='latin1')["matrices"]
+        dev_docs = np.load(os.path.join(corpus_dir, "development_docs_new.npz"), encoding='latin1')["matrices"]
+        test_docs = np.load(os.path.join(corpus_dir, "test_docs_new.npz"), encoding='latin1')["matrices"]
     else:
-        train_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/training_docs.npz", encoding='latin1')["matrices"]
-        dev_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/development_docs.npz", encoding='latin1')["matrices"]
-        test_docs = np.load("/anfs/bigdisc/kh562/Corpora/conll-2012/test_docs.npz", encoding='latin1')["matrices"]
+        train_docs = np.load(os.path.join(corpus_dir, "training_docs.npz"), encoding='latin1')["matrices"]
+        dev_docs = np.load(os.path.join(corpus_dir, "development_docs.npz"), encoding='latin1')["matrices"]
+        test_docs = np.load(os.path.join(corpus_dir, "test_docs.npz"), encoding='latin1')["matrices"]
 
+    # Load the documents, and extract matrices
+    # Mention matrix: [num_mentions, num_tokens], with a 1 at the final token of each mention
+    # Coref matrix: [num_mentions, num_mentions], with a 1 whenever two mentions are coreferent
+    
     train_conll_docs = conll_reader.get_conll_docs("train")
     train_mention_matrix = [get_mention_matrix(x) for x in train_conll_docs]
     train_coref_matrix = [coref_matrix(x) for x in train_conll_docs]
@@ -196,7 +202,18 @@ if __name__ == '__main__':
     dev_conll_docs = conll_reader.get_conll_docs("development")
     dev_mention_matrix = [get_mention_matrix(x) for x in dev_conll_docs]
     dev_coref_matrix = [coref_matrix(x) for x in dev_conll_docs]
-
+    
+    # Add an extra index (for a "batch size" of 1)
+    
+    train_docs = [np.expand_dims(x, 0) for x in train_docs]
+    dev_docs = [np.expand_dims(x, 0) for x in dev_docs]
+    test_docs = [np.expand_dims(x, 0) for x in test_docs]
+    train_mention_matrix = [np.expand_dims(x, 0) for x in train_mention_matrix]
+    train_coref_matrix = [np.expand_dims(x, 0) for x in train_coref_matrix]
+    dev_mention_matrix = [np.expand_dims(x, 0) for x in dev_mention_matrix]
+    dev_coref_matrix = [np.expand_dims(x, 0) for x in dev_coref_matrix]
+    
+    ### Construct the computation graph ###
     
     # Input data
     
@@ -210,68 +227,71 @@ if __name__ == '__main__':
     
     # Model
     
+    # Apply the Salience LSTM
     cell = SalienceLSTMCell(MEMORY_SIZE, MAX_MENTIONS, HIDDEN_SIZE)
-    (decisions, outputs), last_state = tf.nn.dynamic_rnn(cell, [embeddings, mention_float], dtype=tf.float64)
-    
+    (decisions, _), last_state = tf.nn.dynamic_rnn(cell, [embeddings, mention_float], dtype=tf.float64)
+    # Get the decision for each mention
     masked_decisions = tf.matmul(token_to_mention_float, decisions, transpose_a=True)
-    
-    predictions = tf.matmul(masked_decisions, masked_decisions, transpose_b=True)
+    # Find the agreement for each pair of mentions
+    # NOTE: the diagonal will not be exactly 1, because a mention can be assigned to multiple memories 
+    raw_predictions = tf.matmul(masked_decisions, masked_decisions, transpose_b=True)
+    ones = tf.ones([1, tf.shape(raw_predictions)[-1]], dtype=tf.float64)
+    predictions = tf.matrix_set_diag(raw_predictions, ones)  # TODO unclear if this helps
+    # Find the cross entropy (adding 1e-10 to avoid numerical errors)
     x_entropy =  - (1/tf.size(gold_float)) * tf.reduce_sum(gold_float*tf.log(predictions+(1e-10)) + \
                                                            (1-gold_float)*tf.log(1-predictions+(1e-10)))
+    # Add L2 regularization to the cost
     reg = REGULARIZATION*sum([tf.reduce_sum(x**2) for x in tf.trainable_variables()])
     cost = x_entropy + reg
     
+    # Define the optimizer
     optimizer = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE).minimize(cost)
     
+    # Start the session
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
         print("Starting session")
         print("Input size is", INPUT_SIZE)
 
-        # Toy data
-        toy_embeddings = np.random.random((1,11,INPUT_SIZE))
-        toy_token_to_mention = np.zeros((1,11,3), dtype=np.bool)
-        toy_token_to_mention[0,0,0] = 1
-        toy_token_to_mention[0,3,1] = 1
-        toy_token_to_mention[0,9,2] = 1
-        toy_gold = np.eye(3, dtype=np.bool).reshape((1,3,3))
-        toy_gold[0,0,1] = 1
-        toy_gold[0,1,0] = 1
-        
-#        feed_dict = {embeddings: toy_embeddings,
-#                     token_to_mention: toy_token_to_mention,
-#                     gold: toy_gold}
-
         for step in range(EPOCHS):
-            skipped = 0
-            for i in range(len(train_conll_docs)):
+            skipped = 0  # Counter for empty documents
+            # Iterate through documents
+            for new_embeddings, new_token_to_mention, new_gold in zip(train_docs, train_mention_matrix, train_coref_matrix):
 
-                print("Train docs", tf.expand_dims(train_docs[i], 0).get_shape())
-                print("Train s matrix", tf.expand_dims(train_mention_matrix[i], 0).get_shape())
-                print("Gold", tf.expand_dims(train_coref_matrix[i], 0).get_shape())
+                print("===")
+                print("Train docs", new_embeddings.shape)
+                print("Train mention matrix", new_token_to_mention.shape)
+                print("Gold", new_gold.shape)
                 
-                new_embeddings = np.expand_dims(train_docs[i], axis=0)
-                new_gold = np.expand_dims(train_coref_matrix[i], axis=0)
-                new_token_to_mention = np.expand_dims(train_mention_matrix[i].transpose(), axis=0)
+                # Check for empty documents
+                if new_gold.size == 0:
+                    skipped += 1
+                    continue
+                
+                # Feed data into computation graph
                 feed_dict = {embeddings: new_embeddings,
                      token_to_mention: new_token_to_mention,
                      gold: new_gold}
-
-                if train_coref_matrix[i].size == 0:
-                    skipped += 1
-                    continue
+                
+                # Train parameters
                 sess.run(optimizer, feed_dict=feed_dict)
 
+                # Run forward pass and print outputs
                 def print_forward_pass():
-                    decision_mat, final_state, this_cost = sess.run([decisions, last_state, cost], feed_dict=feed_dict)
-                    print('outputs:')
+                    decision_mat, (memory, salience, index_float, *_), this_cost, this_pred, this_ent = sess.run([masked_decisions, last_state, cost, predictions, x_entropy], feed_dict=feed_dict)
+                    print('decisions:')
                     print(decision_mat)
-                    print('final state:')
-                    for i, s in enumerate(final_state):
-                        print(i)
-                        print(s)
-                    print('cost:')
-                    print(this_cost)
+                    print('predictions:')
+                    print(this_pred)
+                    print('gold:')
+                    print(new_gold)
+                    index = int(index_float)
+                    print('final memory:')
+                    print(memory[0,:index])
+                    print('final salience:')
+                    print(salience[0,:index])
+                    print('no. mentions:', new_gold.shape[-1])
+                    print('cost:', this_cost)
+                    print('xent:', this_ent)
 
                 print_forward_pass()
-        

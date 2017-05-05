@@ -33,11 +33,12 @@ def get_s_matrix(doc):
             S_list.append(row)
     if S_list:
         return np.array(S_list)
-    return np.zeros((0,n_toks))
+    else:
+        return np.zeros((0,n_toks))
 
 def get_mention_matrix(doc):
     """
-    Return a matrix of shape [num_mentions, num_tokens],
+    Return a matrix of shape [num_tokens, num_mentions],
     with a value of 1 at the final token of each mention. 
     :param doc: ConllDocument
     :return: numpy array
@@ -58,8 +59,9 @@ def get_mention_matrix(doc):
             row[end_index] = 1
             S_list.append(row)
     if S_list:
-        return np.array(S_list)
-    return np.zeros((0,n_toks))
+        return np.transpose(np.array(S_list))
+    else:
+        return np.zeros((n_toks,0))
     
 def coref_matrix(doc):
     """
