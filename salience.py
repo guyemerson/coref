@@ -10,7 +10,7 @@ class SalienceMemoryMixin(tf.contrib.rnn.RNNCell):
     >>>     pass
     """
     
-    def __init__(self, memory_size, max_mentions, *args, **kwargs):
+    def __init__(self, memory_size, max_mentions, *args, salience_decay=0.9, new_entity_score=0.2, attention_beta=10., **kwargs):
         """
         Set sizes of tensors and initialise weights
         :param memory_size: number of dimensions in each memory vector
@@ -34,9 +34,9 @@ class SalienceMemoryMixin(tf.contrib.rnn.RNNCell):
         # Connection from hidden state to memory
         self.hidden_to_memory = tf.Variable(tf.random_normal((self.inner_output_size, memory_size), stddev=0.01, dtype=tf.float64))
         # Special parameters
-        self.salience_decay = tf.constant(0.9, tf.float64) #tf.Variable(, dtype=tf.float64)
-        self.new_entity_score = tf.constant(0.5, tf.float64) #tf.Variable(, dtype=tf.float64)
-        self.attention_beta = tf.constant(5., tf.float64) #tf.Variable(, dtype=tf.float64)
+        self.salience_decay = tf.constant(salience_decay, tf.float64) #tf.Variable(, dtype=tf.float64)
+        self.new_entity_score = tf.constant(new_entity_score, tf.float64) #tf.Variable(, dtype=tf.float64)
+        self.attention_beta = tf.constant(attention_beta, tf.float64) #tf.Variable(, dtype=tf.float64)
     
     @property
     def state_size(self):
@@ -149,10 +149,10 @@ if __name__ == '__main__':
     parser.add_argument("--print_minibatch_loss", help="Print minibatch (document) loss during training", action="store_true")
     parser.add_argument("--print_dev_loss", help="Print minibatch (document) loss during evaluation on the dev set", action="store_true")
     parser.add_argument("--epochs", help="Number of training epochs", default=20)
-    parser.add_argument("--learning_rate", help="Learning rate for training", default=0.1)
-    parser.add_argument("--hidden_size", help="Number of hidden units", default=600)
+    parser.add_argument("--learning_rate", help="Learning rate for training", default=0.001)
+    parser.add_argument("--hidden_size", help="Number of hidden units", default=100)
     parser.add_argument("--threshold", help="Threshold value for coference (between 0 and 1)", default=0.79)
-    parser.add_argument("--reg_weight", help="The weight of regularization function", default=1e-7)
+    parser.add_argument("--reg_weight", help="The weight of the regularization term", default=1e-7)
     parser.add_argument("--print_coref_matrices", help="Print gold and predicted coreference matrices", action="store_true")
     parser.add_argument("--additional_features",help="Use vectors containing additional features",action="store_true")
     parser.add_argument("--model_dir", help="Directory for saving models", default="models")
@@ -234,12 +234,19 @@ if __name__ == '__main__':
     masked_decisions = tf.matmul(token_to_mention_float, decisions, transpose_a=True)
     # Find the agreement for each pair of mentions
     # NOTE: the diagonal will not be exactly 1, because a mention can be assigned to multiple memories 
+    # So, set the diagonal to be 1, because these are not interesting (TODO, does this help?)
     raw_predictions = tf.matmul(masked_decisions, masked_decisions, transpose_b=True)
     ones = tf.ones([1, tf.shape(raw_predictions)[-1]], dtype=tf.float64)
-    predictions = tf.matrix_set_diag(raw_predictions, ones)  # TODO unclear if this helps
+    predictions = tf.matrix_set_diag(raw_predictions, ones)
     # Find the cross entropy (adding 1e-10 to avoid numerical errors)
-    x_entropy =  - (1/tf.size(gold_float)) * tf.reduce_sum(gold_float*tf.log(predictions+(1e-10)) + \
-                                                           (1-gold_float)*tf.log(1-predictions+(1e-10)))
+    #x_entropy =  - (1/tf.size(gold_float)) * tf.reduce_sum(gold_float*tf.log(predictions+(1e-10)) + \
+    #                                                       (1-gold_float)*tf.log(1-predictions+(1e-10)))
+    # Find the number of non-diagonal 1s and 0s, so that we can weight them equally (TODO, does this help?) 
+    n_mentions = tf.cast(tf.shape(gold_float)[-1], tf.float64)
+    n_ones = tf.reduce_sum(gold_float) - n_mentions
+    n_zeros = n_mentions*(n_mentions-1) - n_ones + 1e-10 
+    x_entropy = - (1/n_ones) * tf.reduce_sum(gold_float * tf.log(predictions + 1e-10)) \
+                - (1/n_zeros) * tf.reduce_sum((1-gold_float) * tf.log(1-predictions + 1e-10)) 
     # Add L2 regularization to the cost
     reg = REGULARIZATION*sum([tf.reduce_sum(x**2) for x in tf.trainable_variables()])
     cost = x_entropy + reg
@@ -252,16 +259,36 @@ if __name__ == '__main__':
         sess.run(tf.global_variables_initializer())
         print("Starting session")
         print("Input size is", INPUT_SIZE)
+        
+        def print_forward_pass(feed_dict):
+            """
+            Run forward pass and print outputs
+            """
+            decision_mat, (memory, salience, index_float, *_), this_cost, this_pred, this_ent = sess.run([masked_decisions, last_state, cost, predictions, x_entropy], feed_dict=feed_dict)
+            print('decisions:')
+            print(decision_mat)
+            print('predictions:')
+            print(this_pred)
+            print('gold:')
+            print(new_gold)
+            index = int(index_float)
+            print('final memory:')
+            print(memory[0,:index])
+            print('final salience:')
+            print(salience[0,:index])
+            print('no. mentions:', new_gold.shape[-1])
+            print('cost:', this_cost)
+            print('xent:', this_ent)
 
         for step in range(EPOCHS):
             skipped = 0  # Counter for empty documents
             # Iterate through documents
             for new_embeddings, new_token_to_mention, new_gold in zip(train_docs, train_mention_matrix, train_coref_matrix):
 
-                print("===")
-                print("Train docs", new_embeddings.shape)
-                print("Train mention matrix", new_token_to_mention.shape)
-                print("Gold", new_gold.shape)
+                #print("===")
+                #print("Train docs", new_embeddings.shape)
+                #print("Train mention matrix", new_token_to_mention.shape)
+                #print("Gold", new_gold.shape)
                 
                 # Check for empty documents
                 if new_gold.size == 0:
@@ -276,22 +303,4 @@ if __name__ == '__main__':
                 # Train parameters
                 sess.run(optimizer, feed_dict=feed_dict)
 
-                # Run forward pass and print outputs
-                def print_forward_pass():
-                    decision_mat, (memory, salience, index_float, *_), this_cost, this_pred, this_ent = sess.run([masked_decisions, last_state, cost, predictions, x_entropy], feed_dict=feed_dict)
-                    print('decisions:')
-                    print(decision_mat)
-                    print('predictions:')
-                    print(this_pred)
-                    print('gold:')
-                    print(new_gold)
-                    index = int(index_float)
-                    print('final memory:')
-                    print(memory[0,:index])
-                    print('final salience:')
-                    print(salience[0,:index])
-                    print('no. mentions:', new_gold.shape[-1])
-                    print('cost:', this_cost)
-                    print('xent:', this_ent)
-
-                print_forward_pass()
+                print_forward_pass(feed_dict)
