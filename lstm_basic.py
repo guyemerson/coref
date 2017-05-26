@@ -37,7 +37,6 @@ tf.set_random_seed(99)
 
 LEARNING_RATE = float(args.learning_rate)
 EPOCHS = int(args.epochs)
-# TODO: input size to be set to 300 when using Google news embeddings else 362 avec additional features
 INPUT_SIZE = 362 if args.additional_features else 300
 NUM_HIDDEN = int(args.hidden_size)
 # threshold for cosine similarity on coref matrix (C) 
@@ -51,35 +50,38 @@ REGULARIZATION_WEIGHT=float(args.reg_weight)
 
 # Embedding matrix
 x = tf.placeholder(tf.float64, [None, INPUT_SIZE])  # num tokens this doc, input vec size
+tf.add_to_collection('x', x)
 # Coreference matrix
 y = tf.placeholder(tf.float64, [None, None])        # num mentions this doc, num mentions this doc
+tf.add_to_collection('y', y)
 # Referring expression matrix
 s = tf.placeholder(tf.float64, [None, None])        # num mentions this doc, num tokens this doc
+tf.add_to_collection('s', s)
 
 ### Define the model
 
 # RNN
-cell = tf.contrib.rnn.core_rnn_cell.BasicLSTMCell(NUM_HIDDEN, state_is_tuple=True)
-broadcast_x = tf.expand_dims(x, 0)  # Set batch size to 1
-broadcast_outputs, states = tf.nn.dynamic_rnn(cell, broadcast_x, dtype=tf.float64)
-outputs = tf.squeeze(broadcast_outputs)  # Remove the batch size index (of size 1)
+cell = tf.contrib.rnn.core_rnn_cell.BasicLSTMCell(NUM_HIDDEN, state_is_tuple=True, name="cell")
+broadcast_x = tf.expand_dims(x, 0, name="op_broadcast_x")  # Set batch size to 1
+broadcast_outputs, states = tf.nn.dynamic_rnn(cell, broadcast_x, dtype=tf.float64, name="broadcast_cell")
+outputs = tf.squeeze(broadcast_outputs, name="op_outputs")  # Remove the batch size index (of size 1)
 
 # Entity representations
-entities = tf.matmul(s, outputs)
+entities = tf.matmul(s, outputs, name="op_entities")
 # Normalise
-normed_entities = tf.nn.l2_normalize(entities, 1)
+normed_entities = tf.nn.l2_normalize(entities, 1, name="op_normed_entities")
 # Cosine similarity
-dot_product = tf.matmul(normed_entities, tf.transpose(normed_entities))  # num mentions, num mentions
-nonneg_sim = tf.nn.relu(dot_product)
+dot_product = tf.matmul(normed_entities, tf.transpose(normed_entities), name="op_dot_product")  # num mentions, num mentions
+nonneg_sim = tf.nn.relu(dot_product, name="op_nonneg_sim")
 
 # OLD COST (square distance)
 # cost = tf.nn.l2_loss(nonneg_sim - y)
 
 # NEW COST (cross entropy)
 
-cost =  - tf.reduce_sum(y*tf.log(nonneg_sim+(1e-10)) + (1-y)*tf.log(1+(1e-10)-nonneg_sim)) / tf.cast(tf.size(y), tf.float64)
-reg = REGULARIZATION_WEIGHT*sum([tf.reduce_sum(x**2) for x in tf.trainable_variables()])
-cost = cost + reg
+rawcost =  - tf.reduce_sum(y*tf.log(nonneg_sim+(1e-10)) + (1-y)*tf.log(1+(1e-10)-nonneg_sim)) / tf.cast(tf.size(y), tf.float64, name="op_rawcost")
+reg = REGULARIZATION_WEIGHT*sum([tf.reduce_sum(x**2) for x in tf.trainable_variables()], name="op_reg")
+cost = tf.add(rawcost, reg, name="op_cost")
 # cost1 =  y*tf.log(nonneg_sim+(1e-10))
 # cost2 =  (1-y)*tf.log(1+(1e-10)-nonneg_sim)
 # cost3 =  - tf.reduce_sum(y*tf.log(nonneg_sim+(1e-10)) + (1-y)*tf.log(1+(1e-10)-nonneg_sim))
@@ -118,44 +120,89 @@ dev_conll_docs = conll_reader.get_conll_docs("development")
 dev_s_matrix = [get_s_matrix(x) for x in dev_conll_docs]
 dev_coref_matrix = [coref_matrix(x) for x in dev_conll_docs]
 
+saver = tf.train.Saver()
+
 if(args.eval_on_model=='none'):
-	with tf.Session() as sess:
-	    saver = tf.train.Saver()
-	    sess.run(init)
-	    print("Starting session")
-	    for step in range(EPOCHS):
-                metrics_this_epoch = defaultdict(lambda: defaultdict(list))
-                losses_this_epoch = []
+    with tf.Session() as sess:
+        sess.run(init)
+        print("Starting session")
+        for step in range(EPOCHS):
+            metrics_this_epoch = defaultdict(lambda: defaultdict(list))
+            losses_this_epoch = []
+            skipped = 0
+            for i in range(len(train_conll_docs)):
+                current_dict = {x: train_docs[i], y: train_coref_matrix[i], s: train_s_matrix[i]}
+                if train_coref_matrix[i].size == 0:
+                    skipped += 1
+                    continue
+                sess.run(optimizer, feed_dict=current_dict)
+
+                loss, coref_mat = sess.run([cost, nonneg_sim], feed_dict=current_dict)
+		# get evaluation of current predicted coref matrix
+                losses_this_epoch.append(loss)
+                try:   # avoid errors at some thresholds
+                    evals = get_evaluation(train_conll_docs[i],coref_mat,THRESHOLD)
+                except:
+                    continue
+                if args.print_coref_matrices:
+                    print("GOLD COREFERENCE MATRIX")
+                    print(train_coref_matrix[i])
+                    print("PREDICTED COREFERENCE MATRIX")
+                    print(coref_mat)
+                for m in metrics:
+                    metrics_this_epoch[m]['R'].append(evals[m][0])
+                    metrics_this_epoch[m]['P'].append(evals[m][1])
+                    metrics_this_epoch['conll']['avg'].append(evals['avg'])
+                if args.print_document_scores:
+                    print(evals["formatted"])
+                if args.print_minibatch_loss:
+                    print("Epoch {}\nDocument {}\nMinibatch loss {:.6f}".format(step+1, i, loss))
+                avg_scores = defaultdict(lambda: defaultdict(float))
+            for m in metrics_this_epoch:
+                for t in metrics_this_epoch[m]:
+                    avg_scores[m][t] = sum(metrics_this_epoch[m][t]) / len(metrics_this_epoch[m][t])
+            avg_loss=sum(losses_this_epoch) / len(losses_this_epoch)
+            formatted = "\tR\tP\tF1\n"
+            for m in metrics:
+                formatted += m + "\t" + format(avg_scores[m]['R'], '.2f') + "\t" +  format(avg_scores[m]['P'], '.2f') + "\t" + format((2*avg_scores[m]['P']*avg_scores[m]['R'])/(avg_scores[m]['P'] + avg_scores[m]['R']), '.2f') + "\n"
+            formatted += "\n"
+            formatted += "conll\t\t\t" + format(avg_scores['conll']['avg'], '.2f') + "\n"
+            print("AVERAGE METRICS FOR EPOCH", step+1)
+            print(formatted)
+            print("AVERAGE LOSS FOR EPOCH {}\n{:.6f}".format(step+1, avg_loss))
+            print("Skipped {} documents with zero mentions".format(skipped))
+
+            print("Saving model")
+            saver.save(sess, args.model_dir + '/' + 'model_' + str(LEARNING_RATE) + '_' + str(EPOCHS) + '_' + str(NUM_HIDDEN) + '_' + str(REGULARIZATION_WEIGHT) + '_epoch' + str(step+1))
+
+                
+            for thresh in [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
+                print("EPOCH", i+1, "THRESHOLD", thresh)
                 skipped = 0
-                for i in range(len(train_conll_docs)):
-                    current_dict = {x: train_docs[i], y: train_coref_matrix[i], s: train_s_matrix[i]}
-                    if train_coref_matrix[i].size == 0:
+                for i in range(len(dev_conll_docs)):
+                    current_dict = {x: dev_docs[i], y: dev_coref_matrix[i], s: dev_s_matrix[i]}
+                    if dev_coref_matrix[i].size == 0:
                         skipped += 1
                         continue
-                    sess.run(optimizer, feed_dict=current_dict)
-
-                    loss, coref_mat = sess.run([cost, nonneg_sim], feed_dict=current_dict)
-		    # get evaluation of current predicted coref matrix
-                    losses_this_epoch.append(loss)
-                    try:   # avoid errors at some thresholds
-                        evals = get_evaluation(train_conll_docs[i],coref_mat,THRESHOLD)
-                    except:
-                        continue
-                    if args.print_coref_matrices:
-                        print("GOLD COREFERENCE MATRIX")
-                        print(train_coref_matrix[i])
-                        print("PREDICTED COREFERENCE MATRIX")
-                        print(coref_mat)
-                    for m in metrics:
-                        metrics_this_epoch[m]['R'].append(evals[m][0])
-                        metrics_this_epoch[m]['P'].append(evals[m][1])
-#                        metrics_this_epoch[m]['F1'].append(evals[m][2])
-                    metrics_this_epoch['conll']['avg'].append(evals['avg'])
-                    if args.print_document_scores:
-                        print(evals["formatted"])
-                    if args.print_minibatch_loss:
-		        # print("Epoch {}\nMinibatch loss {:.6f}\nTraining acc {:.5f}".format(step+1, loss, acc))
-                        print("Epoch {}\nDocument {}\nMinibatch loss {:.6f}".format(step+1, i, loss))
+                loss = sess.run(cost, feed_dict=current_dict)
+                if args.print_dev_loss:
+                    print("Document {} Loss {:.6f}".format(i, loss))
+                coref_mat = sess.run(nonneg_sim, feed_dict=current_dict)
+                losses_this_epoch.append(loss)
+                # get evaluation of current predicted coref matrix
+                try:   # avoid errors at some thresholds
+                    evals = get_evaluation(dev_conll_docs[i],coref_mat,thresh)
+                except:
+                    continue
+                if args.print_coref_matrices:
+                    print("GOLD COREFERENCE MATRIX")
+                    print(dev_coref_matrix[i])
+                    print("PREDICTED COREFERENCE MATRIX")
+                    print(coref_mat)
+                for m in metrics:
+                    metrics_this_epoch[m]['R'].append(evals[m][0])
+                    metrics_this_epoch[m]['P'].append(evals[m][1])
+                metrics_this_epoch['conll']['avg'].append(evals['avg'])
                 avg_scores = defaultdict(lambda: defaultdict(float))
                 for m in metrics_this_epoch:
                     for t in metrics_this_epoch[m]:
@@ -166,57 +213,10 @@ if(args.eval_on_model=='none'):
                     formatted += m + "\t" + format(avg_scores[m]['R'], '.2f') + "\t" +  format(avg_scores[m]['P'], '.2f') + "\t" + format((2*avg_scores[m]['P']*avg_scores[m]['R'])/(avg_scores[m]['P'] + avg_scores[m]['R']), '.2f') + "\n"
                 formatted += "\n"
                 formatted += "conll\t\t\t" + format(avg_scores['conll']['avg'], '.2f') + "\n"
-                print("AVERAGE METRICS FOR EPOCH", step+1)
+                print("AVERAGE METRICS ON DEV SET EPOCH", step+1, "THRESHOLD", thresh)
                 print(formatted)
-                print("AVERAGE LOSS FOR EPOCH {}\n{:.6f}".format(step+1, avg_loss))
+                print("AVERAGE LOSS ON DEV SET\n{:.6f}".format(avg_loss))     
                 print("Skipped {} documents with zero mentions".format(skipped))
-
-                print("Saving model")
-                saver.save(sess, args.model_dir + '/' + 'model_' + str(LEARNING_RATE) + '_' + str(EPOCHS) + '_' + str(NUM_HIDDEN) + '_' + str(REGULARIZATION_WEIGHT) + '_epoch' + str(step+1))
-
-                
-                for thresh in [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
-                    print("EPOCH", i+1, "THRESHOLD", thresh)
-                    skipped = 0
-                    for i in range(len(dev_conll_docs)):
-                        current_dict = {x: dev_docs[i], y: dev_coref_matrix[i], s: dev_s_matrix[i]}
-                        if dev_coref_matrix[i].size == 0:
-                            skipped += 1
-                            continue
-                    loss = sess.run(cost, feed_dict=current_dict)
-                    if args.print_dev_loss:
-                        print("Document {} Loss {:.6f}".format(i, loss))
-                    coref_mat = sess.run(nonneg_sim, feed_dict=current_dict)
-                    losses_this_epoch.append(loss)
-                    # get evaluation of current predicted coref matrix
-                    try:   # avoid errors at some thresholds
-                        evals = get_evaluation(dev_conll_docs[i],coref_mat,thresh)
-                    except:
-                        continue
-                    if args.print_coref_matrices:
-                        print("GOLD COREFERENCE MATRIX")
-                        print(dev_coref_matrix[i])
-                        print("PREDICTED COREFERENCE MATRIX")
-                        print(coref_mat)
-                    for m in metrics:
-                        metrics_this_epoch[m]['R'].append(evals[m][0])
-                        metrics_this_epoch[m]['P'].append(evals[m][1])
-#                        metrics_this_epoch[m]['F1'].append(evals[m][2])
-                    metrics_this_epoch['conll']['avg'].append(evals['avg'])
-                    avg_scores = defaultdict(lambda: defaultdict(float))
-                    for m in metrics_this_epoch:
-                        for t in metrics_this_epoch[m]:
-                            avg_scores[m][t] = sum(metrics_this_epoch[m][t]) / len(metrics_this_epoch[m][t])
-                    avg_loss=sum(losses_this_epoch) / len(losses_this_epoch)
-                    formatted = "\tR\tP\tF1\n"
-                    for m in metrics:
-                        formatted += m + "\t" + format(avg_scores[m]['R'], '.2f') + "\t" +  format(avg_scores[m]['P'], '.2f') + "\t" + format((2*avg_scores[m]['P']*avg_scores[m]['R'])/(avg_scores[m]['P'] + avg_scores[m]['R']), '.2f') + "\n"
-                    formatted += "\n"
-                    formatted += "conll\t\t\t" + format(avg_scores['conll']['avg'], '.2f') + "\n"
-                    print("AVERAGE METRICS ON DEV SET EPOCH", step+1, "THRESHOLD", thresh)
-                    print(formatted)
-                    print("AVERAGE LOSS ON DEV SET\n{:.6f}".format(avg_loss))     
-                    print("Skipped {} documents with zero mentions".format(skipped))
 
 
 with tf.Session() as sess:
