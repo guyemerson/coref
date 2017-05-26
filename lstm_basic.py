@@ -49,21 +49,21 @@ REGULARIZATION_WEIGHT=float(args.reg_weight)
 ### Inputs and outputs
 
 # Embedding matrix
-x = tf.placeholder(tf.float64, [None, INPUT_SIZE])  # num tokens this doc, input vec size
+x = tf.placeholder(tf.float32, [None, INPUT_SIZE])  # num tokens this doc, input vec size
 tf.add_to_collection('x', x)
 # Coreference matrix
-y = tf.placeholder(tf.float64, [None, None])        # num mentions this doc, num mentions this doc
+y = tf.placeholder(tf.float32, [None, None])        # num mentions this doc, num mentions this doc
 tf.add_to_collection('y', y)
 # Referring expression matrix
-s = tf.placeholder(tf.float64, [None, None])        # num mentions this doc, num tokens this doc
+s = tf.placeholder(tf.float32, [None, None])        # num mentions this doc, num tokens this doc
 tf.add_to_collection('s', s)
 
 ### Define the model
 
 # RNN
-cell = tf.contrib.rnn.core_rnn_cell.BasicLSTMCell(NUM_HIDDEN, state_is_tuple=True, name="cell")
+cell = tf.contrib.rnn.core_rnn_cell.BasicLSTMCell(NUM_HIDDEN, state_is_tuple=True)
 broadcast_x = tf.expand_dims(x, 0, name="op_broadcast_x")  # Set batch size to 1
-broadcast_outputs, states = tf.nn.dynamic_rnn(cell, broadcast_x, dtype=tf.float64, name="broadcast_cell")
+broadcast_outputs, states = tf.nn.dynamic_rnn(cell, broadcast_x, dtype=tf.float32)
 outputs = tf.squeeze(broadcast_outputs, name="op_outputs")  # Remove the batch size index (of size 1)
 
 # Entity representations
@@ -79,8 +79,8 @@ nonneg_sim = tf.nn.relu(dot_product, name="op_nonneg_sim")
 
 # NEW COST (cross entropy)
 
-rawcost =  - tf.reduce_sum(y*tf.log(nonneg_sim+(1e-10)) + (1-y)*tf.log(1+(1e-10)-nonneg_sim)) / tf.cast(tf.size(y), tf.float64, name="op_rawcost")
-reg = REGULARIZATION_WEIGHT*sum([tf.reduce_sum(x**2) for x in tf.trainable_variables()], name="op_reg")
+rawcost =  - tf.reduce_sum(y*tf.log(nonneg_sim+(1e-10)) + (1-y)*tf.log(1+(1e-10)-nonneg_sim)) / tf.cast(tf.size(y), tf.float32, name="op_rawcost")
+reg = tf.multiply(REGULARIZATION_WEIGHT, sum([tf.reduce_sum(x**2) for x in tf.trainable_variables()]), name="op_reg")
 cost = tf.add(rawcost, reg, name="op_cost")
 # cost1 =  y*tf.log(nonneg_sim+(1e-10))
 # cost2 =  (1-y)*tf.log(1+(1e-10)-nonneg_sim)
@@ -135,9 +135,7 @@ if(args.eval_on_model=='none'):
                 if train_coref_matrix[i].size == 0:
                     skipped += 1
                     continue
-                sess.run(optimizer, feed_dict=current_dict)
-
-                loss, coref_mat = sess.run([cost, nonneg_sim], feed_dict=current_dict)
+                loss, coref_mat, _ = sess.run([cost, nonneg_sim, optimizer], feed_dict=current_dict)
 		# get evaluation of current predicted coref matrix
                 losses_this_epoch.append(loss)
                 try:   # avoid errors at some thresholds
@@ -152,12 +150,12 @@ if(args.eval_on_model=='none'):
                 for m in metrics:
                     metrics_this_epoch[m]['R'].append(evals[m][0])
                     metrics_this_epoch[m]['P'].append(evals[m][1])
-                    metrics_this_epoch['conll']['avg'].append(evals['avg'])
+                metrics_this_epoch['conll']['avg'].append(evals['avg'])
                 if args.print_document_scores:
                     print(evals["formatted"])
                 if args.print_minibatch_loss:
                     print("Epoch {}\nDocument {}\nMinibatch loss {:.6f}".format(step+1, i, loss))
-                avg_scores = defaultdict(lambda: defaultdict(float))
+            avg_scores = defaultdict(lambda: defaultdict(float))
             for m in metrics_this_epoch:
                 for t in metrics_this_epoch[m]:
                     avg_scores[m][t] = sum(metrics_this_epoch[m][t]) / len(metrics_this_epoch[m][t])
@@ -175,7 +173,7 @@ if(args.eval_on_model=='none'):
             print("Saving model")
             saver.save(sess, args.model_dir + '/' + 'model_' + str(LEARNING_RATE) + '_' + str(EPOCHS) + '_' + str(NUM_HIDDEN) + '_' + str(REGULARIZATION_WEIGHT) + '_epoch' + str(step+1))
 
-                
+            print("Evaluating on dev set\n")    
             for thresh in [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]:
                 print("EPOCH", i+1, "THRESHOLD", thresh)
                 skipped = 0
