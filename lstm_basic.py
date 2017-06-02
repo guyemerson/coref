@@ -18,8 +18,8 @@ parser.add_argument("--print_dev_loss", help="Print minibatch (document) loss du
 parser.add_argument("--epochs", help="Number of training epochs", default=20)
 parser.add_argument("--learning_rate", help="Learning rate for training", default=0.1)
 parser.add_argument("--hidden_size", help="Number of hidden units", default=600)
-parser.add_argument("--threshold", help="Threshold value for coference (between 0 and 1)", default=0.79)
-parser.add_argument("--reg_weight", help="The weight of regularization function", default=0.1)
+parser.add_argument("--threshold", help="Threshold value for coference (between 0 and 1)", default=0.79, type=float)
+parser.add_argument("--reg_weight", help="The weight of regularization function", default=0.1, type=float)
 parser.add_argument("--print_coref_matrices", help="Print gold and predicted coreference matrices", action="store_true")
 parser.add_argument("--additional_features",help="Use vectors containing additional features",action="store_true")
 parser.add_argument("--model_dir", help="Directory for saving models", default="models")
@@ -40,8 +40,8 @@ EPOCHS = int(args.epochs)
 INPUT_SIZE = 362 if args.additional_features else 300
 NUM_HIDDEN = int(args.hidden_size)
 # threshold for cosine similarity on coref matrix (C) 
-THRESHOLD=float(args.threshold)
-REGULARIZATION_WEIGHT=float(args.reg_weight)
+THRESHOLD = args.threshold
+REGULARIZATION_WEIGHT = args.reg_weight
 
 # Currently hard-coding the batch size to be 1
 # This reduces the amount of reshaping that Tensorflow needs to do tensor contraction
@@ -74,19 +74,15 @@ normed_entities = tf.nn.l2_normalize(entities, 1, name="op_normed_entities")
 dot_product = tf.matmul(normed_entities, tf.transpose(normed_entities), name="op_dot_product")  # num mentions, num mentions
 nonneg_sim = tf.nn.relu(dot_product, name="op_nonneg_sim")
 
-# OLD COST (square distance)
-# cost = tf.nn.l2_loss(nonneg_sim - y)
-
-# NEW COST (cross entropy)
-
-rawcost =  - tf.reduce_sum(y*tf.log(nonneg_sim+(1e-10)) + (1-y)*tf.log(1+(1e-10)-nonneg_sim)) / tf.cast(tf.size(y), tf.float32, name="op_rawcost")
+cost =  tf.truediv(-tf.reduce_sum(y*tf.log(nonneg_sim+(1e-5)) + (1-y)*tf.log(1+(1e-5)-nonneg_sim)), tf.cast(tf.size(y), tf.float32), name="op_cost")
 reg = tf.multiply(REGULARIZATION_WEIGHT, sum([tf.reduce_sum(x**2) for x in tf.trainable_variables()]), name="op_reg")
-cost = tf.add(rawcost, reg, name="op_cost")
-# cost1 =  y*tf.log(nonneg_sim+(1e-10))
-# cost2 =  (1-y)*tf.log(1+(1e-10)-nonneg_sim)
-# cost3 =  - tf.reduce_sum(y*tf.log(nonneg_sim+(1e-10)) + (1-y)*tf.log(1+(1e-10)-nonneg_sim))
-# cost4 =  tf.cast(tf.size(y), tf.float64)
+regcost = tf.add(cost, reg, name="op_regcost")
 
+# cost1 =  y*tf.log(nonneg_sim+(1e-5))
+# cost2 =  (1-y)*tf.log(1+(1e-5)-nonneg_sim)
+# cost3 =  - tf.reduce_sum(y*tf.log(nonneg_sim+(1e-5)) + (1-y)*tf.log(1+(1e-5)-nonneg_sim))
+# cost4 =  tf.cast(tf.size(y), tf.float32)
+# cost5 =  tf.truediv(cost3, cost4)
 
 # TODO: currently the importance of a document grows quadratically with the number of referring expressions
 
@@ -95,7 +91,7 @@ cost = tf.add(rawcost, reg, name="op_cost")
 # Train the model
 optimizer = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE).minimize(cost)
 
-init = tf.initialize_all_variables()  # Must be done AFTER introducing the optimizer (see http://stackoverflow.com/questions/33788989/tensorflow-using-adam-optimizer)
+init = tf.global_variables_initializer()
 
 ### Run the model
 
@@ -122,7 +118,7 @@ dev_coref_matrix = [coref_matrix(x) for x in dev_conll_docs]
 
 saver = tf.train.Saver()
 
-if(args.eval_on_model=='none'):
+if args.eval_on_model == 'none':
     with tf.Session() as sess:
         sess.run(init)
         print("Starting session")
@@ -135,7 +131,11 @@ if(args.eval_on_model=='none'):
                 if train_coref_matrix[i].size == 0:
                     skipped += 1
                     continue
-                loss, coref_mat, _ = sess.run([cost, nonneg_sim, optimizer], feed_dict=current_dict)
+                coref_mat, loss, _ = sess.run([nonneg_sim, cost, optimizer], feed_dict=current_dict)
+                print("coref_mat = nonneg_sim", coref_mat)
+                print("loss", loss)
+                if args.print_minibatch_loss:
+                    print("Epoch {}\nDocument {}\nMinibatch loss {:.6f}".format(step+1, i+1, loss))
 		# get evaluation of current predicted coref matrix
                 losses_this_epoch.append(loss)
                 try:   # avoid errors at some thresholds
@@ -153,8 +153,6 @@ if(args.eval_on_model=='none'):
                 metrics_this_epoch['conll']['avg'].append(evals['avg'])
                 if args.print_document_scores:
                     print(evals["formatted"])
-                if args.print_minibatch_loss:
-                    print("Epoch {}\nDocument {}\nMinibatch loss {:.6f}".format(step+1, i, loss))
             avg_scores = defaultdict(lambda: defaultdict(float))
             for m in metrics_this_epoch:
                 for t in metrics_this_epoch[m]:
