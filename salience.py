@@ -10,19 +10,17 @@ class SalienceMemoryMixin(tf.contrib.rnn.RNNCell):
     >>>     pass
     """
     
-    def __init__(self, memory_size, max_mentions, *args, salience_decay=0.9, new_entity_score=0.2, attention_beta=10., **kwargs):
+    def __init__(self, max_mentions, *args, salience_decay=0.99, salience_drop=0.01, new_entity_score=0.5, attention_beta=5., **kwargs):
         """
         Set sizes of tensors and initialise weights
-        :param memory_size: number of dimensions in each memory vector
         :param max_mentions: maximum number of mentions in an input sequence
         Remaining arguments and keyword arguments are passed to super
         """
         # Initialise the standard RNN
         super().__init__(*args, **kwargs)
         # Sizes of objects
-        self.memory_size = memory_size
         self.max_mentions = max_mentions
-        self.inner_output_size = super().output_size
+        self.memory_size = super().output_size
         # We also need RNN updates when queries are returned
         # To do this, we need a new set of weights
         # The Method Resolution Order should be:
@@ -32,9 +30,10 @@ class SalienceMemoryMixin(tf.contrib.rnn.RNNCell):
             self.secondary_cell = ParentClass(*args, **kwargs)
         # Weights
         # Connection from hidden state to memory
-        self.hidden_to_memory = tf.Variable(tf.random_normal((self.inner_output_size, memory_size), stddev=0.01, dtype=tf.float64))
+        self.hidden_to_memory = tf.Variable(tf.random_normal((self.memory_size, self.memory_size), stddev=0.01, dtype=tf.float64))
         # Special parameters
         self.salience_decay = tf.constant(salience_decay, tf.float64) #tf.Variable(, dtype=tf.float64)
+        self.salience_drop = tf.constant(salience_drop, tf.float64) #tf.Variable(, dtype=tf.float64)
         self.new_entity_score = tf.constant(new_entity_score, tf.float64) #tf.Variable(, dtype=tf.float64)
         self.attention_beta = tf.constant(attention_beta, tf.float64) #tf.Variable(, dtype=tf.float64)
     
@@ -94,8 +93,9 @@ class SalienceMemoryMixin(tf.contrib.rnn.RNNCell):
         # Cast index from float to int
         index = tf.cast(index_float, tf.int32)
         # Query over memories
+        # Use residual connection
         # (TODO - choice of activation function?)
-        query = tf.tanh(tf.matmul(inner_output, self.hidden_to_memory))
+        query = tf.tanh(inner_output + tf.matmul(inner_output, self.hidden_to_memory))
         # Cosine similarity between query and memories
         normed_query = tf.nn.l2_normalize(query, dim=1)
         normed_memory = tf.nn.l2_normalize(memory, dim=2)
@@ -103,7 +103,7 @@ class SalienceMemoryMixin(tf.contrib.rnn.RNNCell):
         similarity = tf.matmul(normed_query,  # [1, memory_size]
                                tf.squeeze(normed_memory, 0),  # [1, max_mentions, memory_size]
                                transpose_b=True)
-        weighted_sim = similarity * salience
+        weighted_sim = tf.nn.relu(similarity) * salience  # negative similarity might interact strangely with salience
         # Take attention over these similarities,
         # with a default score for the new entity
         # and no attention for later entities
@@ -125,7 +125,7 @@ class SalienceMemoryMixin(tf.contrib.rnn.RNNCell):
         
         # Decay the salience and increase the salience of the activated memory slot(s)
         # (There could be better ways of updating the salience)
-        new_salience = tf.maximum(salience * self.salience_decay, attention)
+        new_salience = tf.maximum(salience * self.salience_decay - self.salience_drop, attention)
         # Increment the index and cast back to a float
         new_index = index+1
         new_index_float = tf.cast(new_index, tf.float64)
@@ -140,7 +140,7 @@ class SalienceLSTMCell(SalienceMemoryMixin, tf.contrib.rnn.LSTMCell):
 if __name__ == '__main__':
     import argparse, os
     from conll import ConllCorpusReader
-    from matrix_gen import get_mention_matrix, coref_matrix
+    from matrix_gen import get_mention_matrix, get_attachment_matrix
     from evaluation import get_evaluation
     
     # Command line options
@@ -152,7 +152,7 @@ if __name__ == '__main__':
     parser.add_argument("--learning_rate", help="Learning rate for training", default=0.001)
     parser.add_argument("--hidden_size", help="Number of hidden units", default=100)
     parser.add_argument("--threshold", help="Threshold value for coference (between 0 and 1)", default=0.79)
-    parser.add_argument("--reg_weight", help="The weight of the regularization term", default=1e-7)
+    parser.add_argument("--reg_weight", help="The weight of the regularization term", default=1e-4)
     parser.add_argument("--print_coref_matrices", help="Print gold and predicted coreference matrices", action="store_true")
     parser.add_argument("--additional_features",help="Use vectors containing additional features",action="store_true")
     parser.add_argument("--model_dir", help="Directory for saving models", default="models")
@@ -176,10 +176,12 @@ if __name__ == '__main__':
     
     INPUT_SIZE = 362 if args.additional_features else 300
     HIDDEN_SIZE = int(args.hidden_size)
-    MEMORY_SIZE = int(args.hidden_size)
+    #MEMORY_SIZE = int(args.hidden_size)
     
     # true MAX_MENTIONS = 522
     MAX_MENTIONS = 522
+    
+    EXTRA_SUP_WEIGHT = 0.5
 
     # code to load the cached document vectors
     if args.additional_features:
@@ -197,11 +199,11 @@ if __name__ == '__main__':
     
     train_conll_docs = conll_reader.get_conll_docs("train")
     train_mention_matrix = [get_mention_matrix(x) for x in train_conll_docs]
-    train_coref_matrix = [coref_matrix(x) for x in train_conll_docs]
+    train_coref_matrix = [get_attachment_matrix(x) for x in train_conll_docs]
 
     dev_conll_docs = conll_reader.get_conll_docs("development")
     dev_mention_matrix = [get_mention_matrix(x) for x in dev_conll_docs]
-    dev_coref_matrix = [coref_matrix(x) for x in dev_conll_docs]
+    dev_coref_matrix = [get_attachment_matrix(x) for x in dev_conll_docs]
     
     # Add an extra index (for a "batch size" of 1)
     
@@ -228,27 +230,44 @@ if __name__ == '__main__':
     # Model
     
     # Apply the Salience LSTM
-    cell = SalienceLSTMCell(MEMORY_SIZE, MAX_MENTIONS, HIDDEN_SIZE)
-    (decisions, _), last_state = tf.nn.dynamic_rnn(cell, [embeddings, mention_float], dtype=tf.float64)
+    cell = SalienceLSTMCell(MAX_MENTIONS, HIDDEN_SIZE)
+    (decisions, outputs), last_state = tf.nn.dynamic_rnn(cell, [embeddings, mention_float], dtype=tf.float64)
     # Get the decision for each mention
     masked_decisions = tf.matmul(token_to_mention_float, decisions, transpose_a=True)
+    n_mentions = tf.shape(gold)[-1]
+    trimmed_decisions = masked_decisions[:,:,:n_mentions]
+    
+    x_entropy = - (1/tf.size(gold_float)) * tf.reduce_sum(gold_float*tf.log(trimmed_decisions+(1e-10)) + \
+                                                          (1-gold_float)*tf.log(1-trimmed_decisions+(1e-10)))
+    
     # Find the agreement for each pair of mentions
     # NOTE: the diagonal will not be exactly 1, because a mention can be assigned to multiple memories 
     # So, set the diagonal to be 1, because these are not interesting (TODO, does this help?)
-    raw_predictions = tf.matmul(masked_decisions, masked_decisions, transpose_b=True)
-    ones = tf.ones([1, tf.shape(raw_predictions)[-1]], dtype=tf.float64)
-    predictions = tf.matrix_set_diag(raw_predictions, ones)
+    #predictions = tf.matmul(masked_decisions, masked_decisions, transpose_b=True)
+    #ones = tf.ones([1, tf.shape(raw_predictions)[-1]], dtype=tf.float64)
+    #predictions = tf.matrix_set_diag(raw_predictions, ones)
     # Find the cross entropy (adding 1e-10 to avoid numerical errors)
-    #x_entropy =  - (1/tf.size(gold_float)) * tf.reduce_sum(gold_float*tf.log(predictions+(1e-10)) + \
-    #                                                       (1-gold_float)*tf.log(1-predictions+(1e-10)))
+    #x_entropy = - (1/tf.size(gold_float)) * tf.reduce_sum(gold_float*tf.log(predictions+(1e-10)) + \
+    #                                                      (1-gold_float)*tf.log(1-predictions+(1e-10)))
     # Find the number of non-diagonal 1s and 0s, so that we can weight them equally (TODO, does this help?) 
-    n_mentions = tf.cast(tf.shape(gold_float)[-1], tf.float64)
-    n_ones = tf.reduce_sum(gold_float) - n_mentions
-    n_zeros = n_mentions*(n_mentions-1) - n_ones + 1e-10 
-    x_entropy = - (1/n_ones) * tf.reduce_sum(gold_float * tf.log(predictions + 1e-10)) \
-                - (1/n_zeros) * tf.reduce_sum((1-gold_float) * tf.log(1-predictions + 1e-10)) 
+    #n_mentions = tf.cast(tf.shape(gold_float)[-1], tf.float64)
+    #n_ones = tf.reduce_sum(gold_float)
+    #n_zeros = n_mentions**2 - n_ones + 1e-10
+    #n_ones = tf.reduce_sum(gold_float) - n_mentions
+    #n_zeros = n_mentions*(n_mentions-1) - n_ones + 1e-10
+    #x_entropy = - (1/n_ones) * tf.reduce_sum(gold_float * tf.log(predictions + 1e-10)) \
+    #            - (1/n_zeros) * tf.reduce_sum((1-gold_float) * tf.log(1-predictions + 1e-10))
+     
     # Add L2 regularization to the cost
     reg = REGULARIZATION*sum([tf.reduce_sum(x**2) for x in tf.trainable_variables()])
+    
+    # Add an extra supervision signal to predict the input
+    #output_to_embeddings = tf.Variable(tf.random_normal((HIDDEN_SIZE, INPUT_SIZE), stddev=0.01, dtype=tf.float64))
+    #predicted_embeddings = tf.matmul(tf.squeeze(outputs, 0), output_to_embeddings)
+    #difference = predicted_embeddings - tf.squeeze(embeddings, 0)
+    #n_tokens = tf.cast(tf.shape(embeddings)[1], tf.float64)
+    #extra_sup = EXTRA_SUP_WEIGHT * tf.reduce_sum(difference**2) / n_tokens
+    
     cost = x_entropy + reg
     
     # Define the optimizer
@@ -264,18 +283,20 @@ if __name__ == '__main__':
             """
             Run forward pass and print outputs
             """
-            decision_mat, (memory, salience, index_float, *_), this_cost, this_pred, this_ent = sess.run([masked_decisions, last_state, cost, predictions, x_entropy], feed_dict=feed_dict)
-            print('decisions:')
-            print(decision_mat)
-            print('predictions:')
-            print(this_pred)
-            print('gold:')
-            print(new_gold)
+            decision_mat, (memory, salience, index_float, *_), this_cost, this_ent = sess.run([masked_decisions, last_state, cost, x_entropy], feed_dict=feed_dict)
             index = int(index_float)
-            print('final memory:')
-            print(memory[0,:index])
+            print('decisions:')
+            print(decision_mat[0,:,:index])
+            print('gold:')
+            print(new_gold[0])
             print('final salience:')
-            print(salience[0,:index])
+            final_salience = salience[0,:index]
+            top_salience_inds = np.argpartition(final_salience, [-2,-1])[:-3:-1]
+            print(final_salience)
+            print('most salient memories:')
+            print(memory[0, top_salience_inds, :6], "...")
+            print('top final salience:')
+            print(final_salience[top_salience_inds])
             print('no. mentions:', new_gold.shape[-1])
             print('cost:', this_cost)
             print('xent:', this_ent)
