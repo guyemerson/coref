@@ -1,9 +1,11 @@
-import os, logging, re, codecs
+import os, logging, re, codecs, pickle
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s %(levelname)s %(''message)s')
 
 __author__="kevin heffernan"
+
+DEFAULT_CORPUS_DIR = "/anfs/bigdisc/kh562/Corpora/conll-2012/"
 
 class ConllDocument:
     def __init__(self, content):
@@ -93,7 +95,7 @@ class Mention:
         self.tokens.append(token)
 
 class ConllCorpusReader:
-    def __init__(self, root_dir):
+    def __init__(self, root_dir=DEFAULT_CORPUS_DIR):
         self.root_dir = root_dir
         self.train_conll_docs = []
         self.dev_conll_docs = []
@@ -164,3 +166,21 @@ class ConllCorpusReader:
         self.parse_docs("test")
         logging.info("parsing complete")
         return self
+    
+    def cache_corpus(self, cache_dir=None):
+        if cache_dir == None:
+            cache_dir = self.root_dir
+        with open(os.path.join(cache_dir, 'cache.pkl'), 'wb') as f:
+            pickle.dump(self, f)
+    
+    @classmethod
+    def fetch_corpus(cls, root_dir=DEFAULT_CORPUS_DIR, cache_dir=DEFAULT_CORPUS_DIR):
+        cache_filename = os.path.join(cache_dir, 'cache.pkl')
+        if os.path.exists(cache_filename):
+            with open(cache_filename, 'rb') as f:
+                return pickle.load(f)
+        else:
+            reader = cls(root_dir=root_dir)
+            reader.parse_corpus()
+            reader.cache_corpus(cache_dir=cache_dir)
+            return reader

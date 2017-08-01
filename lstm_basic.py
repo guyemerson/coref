@@ -7,7 +7,7 @@ import tensorflow as tf
 import argparse
 import os.path
 
-from conll import ConllCorpusReader
+from conll import ConllCorpusReader, DEFAULT_CORPUS_DIR
 from matrix_gen import get_s_matrix, coref_matrix
 from evaluation import get_evaluation, METRICS, format_scores, harmonic_mean
 
@@ -26,8 +26,7 @@ parser.add_argument("--model_dir", help="Directory for saving models", default="
 parser.add_argument("--saved_model", help="Restore a trained model. To evaluate without further training, set epochs to 0")
 args = parser.parse_args()
 
-corpus_dir = "/anfs/bigdisc/kh562/Corpora/conll-2012/"
-conll_reader = ConllCorpusReader(corpus_dir).parse_corpus()
+conll_reader = ConllCorpusReader.fetch_corpus(cache_dir=os.getcwd())
 
 tf.set_random_seed(99)
 
@@ -59,7 +58,7 @@ tf.add_to_collection('s', s)
 ### Define the model
 
 # RNN
-cell = tf.contrib.rnn.core_rnn_cell.BasicLSTMCell(NUM_HIDDEN, state_is_tuple=True)
+cell = tf.contrib.rnn.BasicLSTMCell(NUM_HIDDEN, state_is_tuple=True)
 broadcast_x = tf.expand_dims(x, 0, name="op_broadcast_x")  # Set batch size to 1
 broadcast_outputs, states = tf.nn.dynamic_rnn(cell, broadcast_x, dtype=tf.float32)
 outputs = tf.squeeze(broadcast_outputs, name="op_outputs")  # Remove the batch size index (of size 1)
@@ -92,13 +91,13 @@ init = tf.global_variables_initializer()
 # cached document vectors
 # latin1 encoding because they were generated with Python 2
 if args.additional_features:
-    train_embeddings = np.load(os.path.join(corpus_dir, "training_docs_new.npz"), encoding='latin1')["matrices"]
-    dev_embeddings = np.load(os.path.join(corpus_dir, "development_docs_new.npz"), encoding='latin1')["matrices"]
-    test_embeddings = np.load(os.path.join(corpus_dir, "test_docs_new.npz"), encoding='latin1')["matrices"]
+    train_embeddings = np.load(os.path.join(DEFAULT_CORPUS_DIR, "training_docs_new.npz"), encoding='latin1')["matrices"]
+    dev_embeddings = np.load(os.path.join(DEFAULT_CORPUS_DIR, "development_docs_new.npz"), encoding='latin1')["matrices"]
+    test_embeddings = np.load(os.path.join(DEFAULT_CORPUS_DIR, "test_docs_new.npz"), encoding='latin1')["matrices"]
 else:
-    train_embeddings = np.load(os.path.join(corpus_dir, "training_docs.npz"), encoding='latin1')["matrices"]
-    dev_embeddings = np.load(os.path.join(corpus_dir, "development_docs.npz"), encoding='latin1')["matrices"]
-    test_embeddings = np.load(os.path.join(corpus_dir, "test_docs.npz"), encoding='latin1')["matrices"]
+    train_embeddings = np.load(os.path.join(DEFAULT_CORPUS_DIR, "training_docs.npz"), encoding='latin1')["matrices"]
+    dev_embeddings = np.load(os.path.join(DEFAULT_CORPUS_DIR, "development_docs.npz"), encoding='latin1')["matrices"]
+    test_embeddings = np.load(os.path.join(DEFAULT_CORPUS_DIR, "test_docs.npz"), encoding='latin1')["matrices"]
 
 train_conll_docs = conll_reader.get_conll_docs("train")
 train_s_matrices = [get_s_matrix(x) for x in train_conll_docs]

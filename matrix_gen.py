@@ -23,23 +23,44 @@ def get_s_matrix(doc):
         matrix[i, start_index:end_index] = 1/N
     return matrix
 
-def get_mention_matrix(doc):
+def get_mention_matrix(doc, n_mentions=None):
     """
     Return a matrix of shape [num_tokens, num_mentions],
     with a value of 1 at the final token of each mention. 
     :param doc: ConllDocument
+    :param n_mentions: if specified, pad up to a given number of mentions
     :return: numpy array
     """
     # Find number of tokens and initialize matrix
     n_toks = doc.get_n_tokens()
-    n_mentions = doc.get_n_mentions()
+    doc_mentions = doc.get_n_mentions()
+    if n_mentions is None:
+        n_mentions = doc_mentions
+    else:
+        n_mentions = max(n_mentions, doc_mentions)
     matrix = np.zeros((n_toks, n_mentions), dtype='bool')
     # Generate the matrix
     for i, mention in enumerate(doc.iter_mentions()):
-        # Set 1 at the final token
-        _, end_index = mention.get_document_index(doc)
-        matrix[end_index, i] = 1
+        start_index, end_index = mention.get_document_index(doc)
+        # Set 1 for each token
+        matrix[start_index:end_index+1, i] = 1
+        # Set 2 at the beginning token
+        matrix[start_index, i] = 2
+        # Set 3 at the end token
+        matrix[end_index, i] = 3
     return matrix
+
+def get_beginning_inside_end(doc, *args, **kwargs):
+    """
+    Return matrices of shape [num_tokens, num_mentions], with a value of 1 at:
+    - the first token of each mention
+    - all tokens of each mention
+    - the last token of each mention
+    :param doc: ConllDocument
+    :return: numpy arrays
+    """
+    mat = get_mention_matrix(doc, *args, **kwargs)
+    return mat == 2, mat > 0, mat == 3
 
 def get_attachment_matrix(doc):
     """
