@@ -16,7 +16,7 @@ for conll_doc in train_conll_docs:
     for chain_id in coref_chain:
         mentions = coref_chain[chain_id]
         if len(mentions)==217:
-            print document_tokens
+            print(document_tokens)
         for mention in mentions:
             chain_id = mention.chain_id
             index = mention.get_document_index(conll_doc)

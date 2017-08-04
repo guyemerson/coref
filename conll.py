@@ -15,6 +15,7 @@ class ConllDocument:
         self.coref_chain = {}
         self.open_mentions = []
         self.content = content
+        self.mentions = []
 
     def add_sent(self, sent):
         self.sents.append(sent)
@@ -23,12 +24,16 @@ class ConllDocument:
         self.coref_chain[chain_id] = []
 
     def add_mention(self, mention):
-        chain_id = mention.chain_id
-        self.coref_chain[chain_id].append(mention)
+        self.coref_chain[mention.chain_id].append(mention)
+        # TODO self.mentions gives mentions in the order they start, not the order they end.
+        mention.mention_id = len(self.mentions)
+        self.mentions.append(mention)
          
     def update_coref_chains(self, sent_index, token_index, token, chains):
         for chain in chains.split("|"):
             chain_id = re.sub("\(|\)", "", chain)
+            if chain_id == "-":
+                continue
             if chain_id not in self.coref_chain:
                 self.add_coref_chain(chain_id)
             if chain.startswith("(") and chain.endswith(")"):
@@ -78,6 +83,7 @@ class Mention:
         self.start_index = start_index
         self.end_index = end_index
         self.tokens = []
+        self.mention_id = None
 
     def get_indices(self):
         return self.sent_index, self.start_index, self.end_index

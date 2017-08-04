@@ -8,7 +8,7 @@ class SalienceMemoryMixin(tf.contrib.rnn.RNNCell):
     rather, it makes several methods available for use by a derivative RNN cell class
     """
     
-    def __init__(self, max_mentions, *args, memory_size=None, salience_decay=0.99, salience_drop=0.01, new_entity_score=0.5, attention_beta=5., **kwargs):
+    def __init__(self, max_mentions, *args, memory_size=None, salience_decay=0.999, salience_drop=0.001, new_entity_score=0.5, attention_beta=5., **kwargs):
         """
         Set sizes of tensors and initialise weights
         :param max_mentions: maximum number of mentions in an input sequence
@@ -66,6 +66,7 @@ class SalienceMemoryMixin(tf.contrib.rnn.RNNCell):
         # and no attention for later entities
         # (An alternative attention would involve two decisions:)
         # (whether to use an existing entity, and if so, which  )
+        # TODO - what if a multiple mentions finish on a token, and one of those starts a new chain?
         infs = -np.inf * tf.ones((n_queries, self.max_mentions), dtype=tf.float64)
         single_mask = tf.sequence_mask([index[0]+1], self.max_mentions)
         mask = tf.tile(single_mask, [n_queries, 1])
@@ -76,12 +77,16 @@ class SalienceMemoryMixin(tf.contrib.rnn.RNNCell):
         
         return attention, retrieved_memory
     
-    def write_memory(self, state, attention, update):
+    def write_memory(self, state, attention, update, n_updates):
         """
         Write to the memory extension
-        :param state: tuple of state tensors (memory, salience, index), with batch size of 1
+        :param state: tuple of state tensors (memory, salience, index), with batch size of 1:
+            [1, max_mentions, memory_size], [1, max_mentions], [1]  
         :param attention: batch of distributions over memories
+            [batch_size, max_mentions] 
         :param update: batch of vectors to add to memories
+            [batch_size, memory_size]
+        :param n_updates: number of actual updates in the batch (TODO - tidy this)
         :return: new state
         """
         # Unpack state, ignoring the parent RNN
@@ -92,7 +97,7 @@ class SalienceMemoryMixin(tf.contrib.rnn.RNNCell):
         # Update the salience
         new_salience = tf.maximum(salience, tf.reduce_max(attention, 0))
         # Increment the index
-        new_index = index + 1
+        new_index = index + n_updates
         
         return new_memory, new_salience, new_index
     
@@ -179,25 +184,30 @@ class EntityMixin(SalienceMemoryMixin):
         # Query the salience memory (residual connection), then call the secondary RNN
         queries = tf.tanh(prev_output + tf.matmul(prev_output, self.working_to_query))
         _, responses = self.read_memory(memory_state, queries)
-        hidden_and_response = tf.concat([tf.tile(inner_output, [self.max_mentions, 1]), responses], 1)
+        hidden_and_response = tf.concat([tf.tile(inner_output, [self.max_mentions, 1]),
+                                         responses], 1)
         with tf.variable_scope('secondary_cell'):
             working_output, new_sq_working = self.secondary_cell(hidden_and_response, sq_working)
         # Add batch size of 1, and keep state only when inside the mention
-        new_working_state = [tf.expand_dims(x, 0) for x in new_sq_working]
-        masked_working_state = [x * tf.transpose(inside) for x in new_working_state]
+        new_working_state = [tf.expand_dims(x * tf.transpose(inside), 0)
+                             for x in new_sq_working]
         # Make attachment decisions at the end of each mention
+        # TODO use tf.boolean_mask?
+        #shrunk_working_output = tf.boolean_mask(working_output,
+        #                                        tf.cast(tf.squeeze(end, 0), tf.bool))
         attach_queries = tf.tanh(working_output + tf.matmul(working_output, self.working_to_query))
         attach_decisions, _ = self.read_memory(memory_state, attach_queries)
-        attach_decisions *= tf.transpose(end)
+        masked_attach_decisions = attach_decisions * tf.transpose(end)
+        decision_output = tf.expand_dims(masked_attach_decisions, 0)
         
         # Update salience memory
-        new_memory_state = self.write_memory(memory_state, attach_decisions, attach_queries)
+        n_updates = tf.reduce_sum(end)
+        new_memory_state = self.write_memory(memory_state, masked_attach_decisions, attach_queries, n_updates)
         # Decay salience
         decayed_memory_state = self.decay_salience(new_memory_state)
         
-        #return (decisions, new_output), (new_memory, new_salience, new_index, *new_new_hidden)
-        return (tf.expand_dims(attach_decisions, 0), inner_output), \
-               (masked_working_state, decayed_memory_state, new_inner_state)
+        return (decision_output, inner_output), \
+               (new_working_state, decayed_memory_state, new_inner_state)
 
 
 class EntityLSTMCell(EntityMixin, tf.contrib.rnn.LSTMCell):
@@ -249,7 +259,9 @@ if __name__ == '__main__':
     
     #EXTRA_SUP_WEIGHT = 0.5
 
-    # code to load the cached document vectors
+    ### Load data
+    
+    # Cached embedding matrices
     if args.additional_features:
         train_embs = np.load(os.path.join(DEFAULT_CORPUS_DIR, "training_docs_new.npz"), encoding='latin1')["matrices"]
         dev_embs = np.load(os.path.join(DEFAULT_CORPUS_DIR, "development_docs_new.npz"), encoding='latin1')["matrices"]
@@ -313,23 +325,7 @@ if __name__ == '__main__':
     x_entropy = - (1/tf.size(gold_float)) * tf.reduce_sum(gold_float * tf.log(trimmed_decisions+(1e-10)) \
                                                           + (1-gold_float) * tf.log(1-trimmed_decisions+(1e-10)))
     
-    # Find the agreement for each pair of mentions
-    # NOTE: the diagonal will not be exactly 1, because a mention can be assigned to multiple memories 
-    # So, set the diagonal to be 1, because these are not interesting (TODO, does this help?)
-    #predictions = tf.matmul(masked_decisions, masked_decisions, transpose_b=True)
-    #ones = tf.ones([1, tf.shape(raw_predictions)[-1]], dtype=tf.float64)
-    #predictions = tf.matrix_set_diag(raw_predictions, ones)
-    # Find the cross entropy (adding 1e-10 to avoid numerical errors)
-    #x_entropy = - (1/tf.size(gold_float)) * tf.reduce_sum(gold_float*tf.log(predictions+(1e-10)) + \
-    #                                                      (1-gold_float)*tf.log(1-predictions+(1e-10)))
-    # Find the number of non-diagonal 1s and 0s, so that we can weight them equally (TODO, does this help?) 
-    #n_mentions = tf.cast(tf.shape(gold_float)[-1], tf.float64)
-    #n_ones = tf.reduce_sum(gold_float)
-    #n_zeros = n_mentions**2 - n_ones + 1e-10
-    #n_ones = tf.reduce_sum(gold_float) - n_mentions
-    #n_zeros = n_mentions*(n_mentions-1) - n_ones + 1e-10
-    #x_entropy = - (1/n_ones) * tf.reduce_sum(gold_float * tf.log(predictions + 1e-10)) \
-    #            - (1/n_zeros) * tf.reduce_sum((1-gold_float) * tf.log(1-predictions + 1e-10))
+    # TODO give equal total weight to 0s and 1s?
      
     # Add L2 regularization to the cost
     reg = REGULARIZATION*sum([tf.reduce_sum(x**2) for x in tf.trainable_variables()])

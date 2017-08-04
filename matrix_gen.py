@@ -38,9 +38,9 @@ def get_mention_matrix(doc, n_mentions=None):
         n_mentions = doc_mentions
     else:
         n_mentions = max(n_mentions, doc_mentions)
-    matrix = np.zeros((n_toks, n_mentions), dtype='bool')
+    matrix = np.zeros((n_toks, n_mentions), dtype='int')
     # Generate the matrix
-    for i, mention in enumerate(doc.iter_mentions()):
+    for i, mention in enumerate(doc.mentions):
         start_index, end_index = mention.get_document_index(doc)
         # Set 1 for each token
         matrix[start_index:end_index+1, i] = 1
@@ -71,13 +71,14 @@ def get_attachment_matrix(doc):
     """
     n_mentions = doc.get_n_mentions()
     matrix = np.zeros((n_mentions, n_mentions))
-    i = 0
-    for chain_id in doc.get_sorted_chains_ids():
-        # Note, this assumes mentions are in order
-        chain_length = len(doc.coref_chain[chain_id])
-        if chain_length:  # in case of empty chains
-            matrix[i:i+chain_length, i] = 1
-            i += chain_length
+    
+    # Map from chain's ID to the first mention's ID
+    chain_to_first = {chain_id: mentions[0].mention_id
+                      for chain_id, mentions in doc.coref_chain.items()}
+    
+    for mention in doc.mentions:
+        matrix[mention.mention_id, chain_to_first[mention.chain_id]] = 1
+    
     return matrix
     
 def coref_matrix(doc):
